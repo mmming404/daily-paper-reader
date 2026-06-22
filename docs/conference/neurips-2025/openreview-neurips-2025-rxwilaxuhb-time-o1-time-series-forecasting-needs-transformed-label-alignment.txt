@@ -1,0 +1,2238 @@
+Title: 29297_Time_o1_Time_Series_Fore.pdf
+
+URL Source: https://openreview.net/pdf?id=RxWILaXuhb
+
+Number of Pages: 31
+
+Markdown Content:
+# Time-o1: Time-Series Forecasting Needs Transformed Label Alignment 
+
+Hao Wang 1∗ Licheng Pan 1∗ Zhichao Chen 2 Xu Chen 3†
+
+Qingyang Dai 4 Lei Wang 3 Haoxuan Li 5† Zhouchen Lin 2,6,7†
+
+> 1
+
+Xiaohongshu Inc. 
+
+> 2
+
+State Key Lab of General AI, School of Intelligence Science and Technology, Peking University 
+
+> 3
+
+Gaoling School of Artificial Intelligence, Renmin University of China 
+
+> 4
+
+Department of Control Science and Engineering, Zhejiang University 
+
+> 5
+
+Center for Data Science, Peking University 
+
+> 6
+
+Institute for Artificial Intelligence, Peking University 
+
+> 7
+
+Pazhou Laboratory (Huangpu), Guangzhou, Guangdong, China 
+
+Abstract 
+
+Training time-series forecasting models poses unique challenges in loss func-tion design. Most existing approaches adopt temporal mean squared error, but this study reveals two critical limitations: ❶ it ignores the presence of label autocorrelation , which biases it from the true label sequence likelihood; ❷ it involves excessive number of tasks , which complicates optimization, especially for long-term forecasting. To address these issues, we introduce Time-o1 , a transform-enhanced l oss function for time -series forecasting. The central idea is to transform the label sequence into decorrelated components with discrimi-nated significance. Models are then trained to align the most significant com-ponents, thereby effectively mitigating label autocorrelation and reducing task amount. Experiments demonstrate that Time-o1 achieves state-of-the-art per-formance and is compatible with various forecast models. Code is available at 
+
+https://github.com/Master-PLC/Time-o1 .
+
+1 Introduction 
+
+Time-series forecasting involves predicting future data from historical observations [ 62 , 24 ] and has been applied across diverse domains, such as air quality prediction in meteorology [ 29 ], user behavior analysis in e-commerce [ 3 ], and process monitoring in manufacturing [ 49 , 52 ]. To build effective forecasting models, two questions warrant investigation: (1) How to design a neural network architecture to encode historical observations, and (2) How to devise a loss function to train the neural network. Both are critical for forecast model performance. Recent research has primarily focused on developing neural network architectures [ 57 , 61 ]. The key challenge lies in exploiting the autocorrelation in history sequences. To this end, various architectures have been proposed [ 25 , 41 , 53 , 31 ]. Current progress centers on a debate between Transformers and simple linear models. Transformers, equipped with self-attention mechanisms, offer superior scalability [ 28 , 35 , 30 ]. In contrast, linear models, which encapsulate temporal dynamics using linear layers, are straightforward to implement and demonstrate strong performance [ 67 , 44 , 65 , 63 ]. These advancements showcase the rapid evolution in neural architecture design for time-series forecasting. 
+
+> ∗
+
+This work was done in the internship at Xiaohongshu Inc. Both authors have equal contribution. 
+
+> †
+
+Corresponding author. 39th Conference on Neural Information Processing Systems (NeurIPS 2025). In contrast, the design of loss functions has received less attention [ 51 , 40 , 23 ]. Most studies adopt the temporal mean squared error (TMSE) as the loss function, which calculates the step-wise difference between the forecast and label sequences [ 28 , 35 ]. While it is effective in various scenarios, it exhibits two limitations in time-series forecasting: ❶ it ignores the presence of label autocorrelation ,treating each label step as independent, which renders it biased from the true likelihood of the label sequence [ 51 ]; ❷ it involves excessive number of tasks , where the task amount corresponds to the forecast horizon, which complicates optimization especially in long-term forecast scenarios [69]. To handle these challenges, we propose a transform-enhanced l oss function for time -series forecasting (Time-o1). The key idea is to transform the label sequence into decorrelated components ranked by significance. By aligning the most significant decorrelated components, Time-o1 mitigates label autocorrelation and reduces the number of tasks. Our main contributions are summarized as follows: • We formulate two critical challenges in designing loss functions for time-series forecasting: the label autocorrelation that induces bias, and the excessive number of tasks that impedes optimization. • We propose Time-o1, a novel loss function for training time-series forecast models. It transforms label and forecast sequences into decorrelated components ranked by significance and subsequently align them, which effectively addresses challenges ❶-❷ with theoretical guarantees. • We validate the efficacy of Time-o1 through extensive experiments, where Time-o1 consistently outperforms existing loss functions and enhances the performance of various forecast models. 
+
+2 Preliminaries 
+
+This paper focuses on the time-series forecasting problem [ 39 , 56 ]. In general, we adhere to standard notational conventions: uppercase bold letters ( e.g., X) denote matrices, lowercase bold letters ( e.g., 
+
+x) denote vectors, and lowercase normal letters ( e.g., x) denote scalars. Since the autocorrelation property central to our analysis manifests independently within each variate, we adopt the univariate setting for problem formulation [35], which generalizes naturally to the multivariate setting. A time series, denoted by s = {s1, . . . , s M} ∈ RM, consists of a sequence of chronologically ordered observations. At any time step n, the history sequence is represented by x = [ sn−H+1 , . . . , s n] ∈ RH,and the corresponding label sequence is y = [ sn+1 , . . . , s n+T ] ∈ RT, where H denotes the history length and T is the forecast horizon. The goal of time-series forecasting is to learn a model 
+
+g : RH → RT that produces a forecast sequence ˆy closely matching the ground truth label sequence. There are two aspects to building forecast models: (1) neural network architectures that effectively encode history sequences, and (2) loss functions for training these neural networks. While this paper focuses on the loss function , we provide a brief review of both aspects for contextualization. 
+
+2.1 Model architectures for time-series forecasting 
+
+Neural networks are widely employed to encode history sequences [ 32 , 60 ] due to their ability to automatically model feature interactions and capture complex nonlinear autocorrelation [ 31 , 12 , 11 ]. Notable examples include recurrent neural networks (e.g., S4 [ 10 ], Mamba [ 9], P-sLSTM [ 16 ]), convolutional neural networks (e.g., SCINet [ 27 ], TimesNet [ 58 ], MICN [ 54 ]), and graph neural networks (e.g., MTGNN [ 34 ], StemGNN [ 2]), each tailored to encode the autocorrelations within input sequences. The current progress centers on comparisons between Transformer-based and linear architectures. Transformers (e.g., PatchTST [ 35 ], iTransformer [ 28 ], FreeFormer [ 66 ]) exhibit substantial scalability with increasing data size but entail high computational costs. In contrast, linear architectures (e.g., DLinear [ 67 ], RLinear [ 44 ], OLinear [ 65 ], TimeBase [ 13 ]) are generally more efficient but less scalable with larger datasets and struggle to handle varying input lengths. 
+
+2.2 Loss functions for time-series forecasting 
+
+Modern time-series models predominantly adopt the direct forecast paradigm, generating T-step forecasts simultaneously using a multi-output head [ 22 , 28 , 67 ]. The standard loss function is the temporal mean squared error (TMSE) between the forecast and label sequences, given by: 
+
+LMSE = Y − ˆY 22
+
+=
+
+> N
+
+X
+
+> n=1 T
+
+X
+
+> t=1
+
+(yn,t − ˆyn,t )2 , (1) 2where N is the number of samples. LMSE is widespread in recent studies (e.g., FreTS [ 64 ], Fred-Former [ 37 ], iTransformer [ 28 ], DUET [ 41 ]); however, it proves biased in the presence of label autocorrelation [ 51 ]. To address this bias, one line of works performs shape alignment between the forecast and label sequences (e.g., Soft-DTW [ 4], Dilate [ 18 ], and STRIPE [ 19 ]). While these meth-ods heuristically exploit label autocorrelation, they lack theoretical guarantees regarding unbiasedness and empirical evidence of improved performance [ 18 ]. A more recent and notable approach aligns the label and forecast sequence in the frequency domain [ 51 , 23 ]; this strategy offers theoretical guarantees for bias reduction [51] and empirical improvements across scenarios [55, 20, 70]. 
+
+3 Methodology 
+
+3.1 Motivation 
+
+The design of loss function is pivotal in training forecast models. Most previous studies employ LMSE 
+
+in (1) as the default loss function [ 28 , 35 , 65 ]. However, it suffers from two limitations stemming from the inherent properties of time series. ❶ It ignores the presence of label autocorrelation .Specifically, each observation in time-series is dependent on its past values [ 67 ]; this leads to label autocorrelation, i.e., different steps in the label sequence are correlated. However, LMSE assumes each label step is independent, which disregards label autocorrelation and thus yields a biased loss function, as formulated in Theorem 3.1. ❷ It involves excessive number of tasks. Specifically, the number of forecast tasks in LMSE corresponds directly to the forecast horizon T. While large forecast horizons are crucial for applications such as manufacturing (requiring long-horizon planning [ 50 , 48 ]) and transportation (facilitating proactive traffic control [ 68 , 33 ]), they introduce optimization challenges, e.g., gradient conflicts [69, 26], which impedes convergence and leads to suboptimal performance. 
+
+Theorem 3.1 (Autocorrelation bias) . Given a univariate label sequence y ∈ RT where Σ ∈ RT×T
+
+denotes the step-wise correlation coefficient, the loss function LMSE in (1) is biased from the true negative log-likelihood of the label sequence, which is given by: 
+
+Bias = ∥y − ˆy∥2 
+
+> Σ−1
+
+− ∥ y − ˆy∥2 − 12 log |Σ| . (2) 
+
+where ∥v∥2 
+
+> Σ−1
+
+= v⊤Σ−1v. The bias vanishes if different steps in y are decorrelated. 3
+
+Designing a loss function to handle the two limitations is challenging. Our previous work [ 51 ]proposes a frequency-domain loss, which transforms the label and forecast sequences into frequency components and then aligns them. It is motivated by Theorem 3.1: bias vanishes if different components are decorrelated. However, the decorrelation of frequency components holds only when the forecast horizon T → ∞ (see Theorem 3.3 in [ 51 ]). In real-world settings with a finite horizon, frequency components remain correlated, rendering FreDF ineffective to fully eliminate bias. Moreover, optimization difficulty remains, since transforming to the frequency domain retains the label length. Consequently, FreDF does not fully address the limitations ❶-❷ discussed in this paper. 
+
+Given the significance of loss function in training forecast models and the limitations of existing methods, it is compelling to develop an innovative loss function to address the limitations and advance forecast performance. Concretely, two questions warrant investigation. How to devise a loss function to eliminate autocorrelation bias and reduce task amount? Does it improve forecast performance? 
+
+3.2 Transforming label sequence with optimized projection matrix 
+
+In this section, we present a method for transforming label sequences into latent components to elimi-nate autocorrelation and distinguish significant components. Suppose Y ∈ RN×T contains univariate label sequences of N samples, P = [ p1, p2, ..., pK] is the projection matrix; the components are produced as Z = YP . The target is for Z to be decorrelated and ranked by significance. For example, FreDF specifies P as a Fourier matrix, which does not adapt to specific data properties and thus fails to decorrelate the components and distinguish the significant components 4. 
+
+> 3The pioneering work [ 51 ] identifies the bias under the first-order Markov assumption on the label sequence. This study generalizes this bias without the first-order Markov assumption.
+> 4In the multivariate case, different variates can be treated separately to produce decorrelated components.
+
+30
+
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 0
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+
+(a) Autocorrelation in label sequence and components. 1 16 32 48 64 80 96        
+
+> Time step
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> Volume 116 32 48 64 80 96
+> Component index
+> −7.5
+> −5.0
+> −2.5
+> 0.0
+> 2.5
+> 5.0
+> Volume
+
+(b) Volume of label sequences and latent components. 
+
+Figure 1: The autocorrelations and volumes in the label sequence Y and latent components Z.A natural approach to obtaining P with the desired properties is constructing optimization problem with constraints. Specifically, to find the k-th component, the projection vector p∗ 
+
+> k
+
+can be defined as: 
+
+p∗ 
+
+> k
+
+= argmax 
+
+> pk
+
+(Yp k)⊤ (Yp k)
+
+subject to 
+
+∥pk∥2 = 1 
+
+p⊤ 
+
+> k
+
+pk′ = 0 , ∀ k′ < k if k > 1
+
+(3) where zk = Yp k is the k-th component, the normalization constraint ∥pk∥2 = 1 is imposed to avoid trivial solution: pk → ∞ . The optimization target is to maximize the variance of zk, which is equivalent to maximizing its significance, as components with larger variance contain richer information . For k > 1, the projection axis is required to be orthogonal to the previous axes to avoid redundancy. By solving the optimizations above from k = 1 to K ≤ T sequentially, we obtain the projection matrix P∗ = [ p∗
+
+> 1
+
+, ..., p∗
+
+> K
+
+]. The components are then produced as Z = YP ∗.
+
+Lemma 3.2 (Decorrelated components) . Suppose Y ∈ RN×T contains normalized label sequences for N samples, Z = [ z1, ..., zK] are the obtained components; for any k̸ = k′, we have z⊤ 
+
+> k
+
+zk′ = 0 .
+
+Lemma 3.3. The projection matrix P∗ can be obtained via singular value decomposition (SVD): 
+
+Y = UΛ (P∗)⊤, where U ∈ RN×N and P∗ ∈ RK×K consist of singular vectors, and the diagonal of Λ ∈ RN×K consists of singular values. 
+
+Theoretical Justification. By Theorem 3.1, the autocorrelation bias vanishes as the label corre-lations are eliminated. Since the obtained components Z are decorrelated (Lemma 3.2), applying step-wise difference to align them suffers from little autocorrelation bias. Moreover, component signif-icance decreases from z1 to zK as they are derived under sequentially added constraints. Furthermore, 
+
+P∗ can be computed via SVD (Lemma 3.3), offering an efficient strategy to obtain P∗.
+
+Case study. To showcase the implications of the obtained components, a case study was conducted on the ETTh1 dataset. Implementation details are provided in Appendix A. The results are illustrated in Fig. 1, with key observations summarized as follows: • Decorrelation property: Fig. 1 (a) compares the autocorrelation volume in the label sequence and the transformed components obtained by (3) . In the left panel, the value at row i and column j
+
+represents the correlation between the i-th and j-th steps in the label sequence. A large number of non-diagonal elements exhibit substantial values, with approximately 50.5% exceeding 0.25, indicating significant label autocorrelation. In contrast, the right panel shows negligible values for the non-diagonal elements. This demonstrates that transforming the label sequence into components effectively eliminates correlation, which empirically validates Lemma 3.2. • Significance discrimination: Fig. 1 (b) compares the variance of the label sequence and the transformed components in (3) . In the left panel, the variance of the label sequence is almost uniform across different steps (ranging from -1.5 to 1.5), indicating that different steps contribute similarly to the overall information and are almost equally significant. In the right panel, a small number of components has large variance. This demonstrates that the transform yields components with ranked significance. As a result, one can balance minor information loss with substantial decreases in optimization complexity by concentrating learning on the most significant components. The transformation is highly inspired by principal component analysis (PCA) [ 36 ]. However, one key distinction warrants emphasis. Existing works dominantly employ principal component analysis 4on input features for obtaining informative representations [ 8 , 6], in contrast, we adapt it to label sequence , specifically aiming to reduce autocorrelation bias and simplify optimization for time-series forecasting. To our knowledge, this remains a technically innovative strategy. 
+
+3.3 Model implementation                                           
+
+> Algorithm 1 The workflow of Time-o1.
+> Input :ˆY: forecast sequences, Y: label sequences.
+> Parameter :α: the relative weight of the transformed loss, γ: the ratio of retained components.
+> Output :Lα,γ : the obtained loss function. 1: Y←standardize( Y).2: K←round( γ·T)
+> 3: P∗←SVD( Y; K)
+> 4: Z←YP ∗,ˆZ←ˆYP ∗
+> 5: Lortho ,γ ← ∥ ˆZ−Z∥1
+> 6: LMSE ← ∥ ˆY−Y∥22
+> 7: Lα,γ := α· L ortho ,γ + (1 −α)· L MSE .
+
+In this section, we present the implementation details of Time-o1. The approach centers on extracting the latent components from the label sequence, then optimizing the forecast model using the most significant components. Given N history sequences X ∈ RN×H and la-bel sequences Y ∈ RN×T, the forecast model generates forecast sequences ˆY = g(X). In line with prior practices [ 28 , 67 , 37 ], we standardize 
+
+Y (step 1), which is a prerequisite for ensuring the decorrelation of the resulting components (see Lemma 3.2). Next, following Lemma 3.3, we compute the optimal projection matrix P∗ by applying SVD to Y, retaining only the K right singular vectors corresponding to the largest sin-gular values (steps 2-3). Subsequently, both Y and ˆY are projected into the latent component space (step 4). In this space, significance is strictly ordered: the first column captures the greatest significance (variance), which successively diminishes across subsequent columns. Afterwards, we compute the transformed loss to align Y and ˆY in the transformed space (step 5): 
+
+Lortho ,γ : = ∥Z − Z∥1 , (4) where γ controls the ratio of components retained, such that K = round( γ · T) ; ∥·∥ 1 computes the sum of element-wise absolute differences. Notably, we use the ℓ1 norm instead of the squared norm following [ 51 ], since different latent components vary greatly in scale (see Fig. 1), which makes the squared norm unstable. The ℓ1 norm provides a more stable and robust optimization landscape. Finally, we fuse the two loss functions, with 0 ≤ α ≤ 1 controlling the relative contribution (step 7): 
+
+Lα,γ := α · L ortho ,γ + (1 − α) · L MSE . (5) By transforming both forecasts and labels into decorrelated components, Time-o1 effectively re-duces autocorrelation bias. By focusing exclusively on the most significant components, Time-o1 reduces optimization difficulty with minimal information loss. Time-o1 is model-agnostic, offering practitioners the flexibility to employ the most suitable forecast model for each specific scenario. 
+
+4 Experiments 
+
+To demonstrate the efficacy of Time-o1, there are six aspects empirically investigated: 1. Performance: Does Time-o1 work? We compare Time-o1 with state-of-the-art baselines us-ing public datasets on long-term forecasting in Section 4.2 and short-term forecasting tasks in Appendix E.1. Moreover, we compare Time-o1 with other loss functions in Section 4.3. 2. Gain: How does it work? Section 4.4 offers an ablative study to dissect the contributions of the individual factors of Time-o1, elucidating their roles in enhancing forecast accuracy. 3. Generality: Does it support other forecast models? Section 4.5 verifies the adaptability of Time-o1 across different forecast models, with additional results in Appendix E.4. 4. Flexibility: Does it support alternative transformations? Section 4.5 also investigates generating latent components with other transformations to showcase flexibility of implementation. 5. Sensitivity: Does it require careful fine-tuning? Section 4.6 presents a sensitivity analysis of the hyperparameter α, where Time-o1 maintains efficacy across a broad range of parameter values. 6. Efficiency: Is it efficient? Section D shows the running time of Time-o1 in diverse settings. 5Table 1: Long-term forecasting performance.                                                                                                                                                                                                                                                  
+
+> Models Time-o1 Fredformer iTransformer FreTS TimesNet MICN TiDE DLinear FEDformer Autoformer Transformer
+> (Ours) (2024) (2024) (2023) (2023) (2023) (2023) (2023) (2022) (2021) (2017)
+> Metrics MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE
+> ETTm1 0.380 0.393 0.387 0.398 0.411 0.414 0.414 0.421 0.438 0.430 0.396 0.421 0.413 0.407 0.403 0.407 0.442 0.457 0.526 0.491 0.799 0.648
+> ETTm2 0.272 0.317 0.280 0.324 0.295 0.336 0.316 0.365 0.302 0.334 0.308 0.364 0.286 0.328 0.342 0.392 0.308 0.354 0.315 0.358 1.662 0.917
+> ETTh1 0.431 0.429 0.447 0.434 0.452 0.448 0.489 0.474 0.472 0.463 0.533 0.519 0.448 0.435 0.456 0.453 0.447 0.470 0.477 0.483 0.983 0.774
+> ETTh2 0.359 0.388 0.377 0.402 0.386 0.407 0.524 0.496 0.409 0.420 0.620 0.546 0.378 0.401 0.529 0.499 0.452 0.461 0.448 0.460 2.688 1.291
+> ECL 0.170 0.260 0.191 0.284 0.179 0.270 0.199 0.288 0.212 0.306 0.192 0.302 0.215 0.292 0.212 0.301 0.214 0.328 0.249 0.354 0.265 0.358
+> Traffic 0.419 0.280 0.486 0.336 0.426 0.285 0.538 0.330 0.631 0.338 0.529 0.312 0.624 0.373 0.625 0.384 0.640 0.398 0.662 0.416 0.692 0.379
+> Weather 0.241 0.280 0.261 0.282 0.269 0.289 0.249 0.293 0.271 0.295 0.264 0.321 0.272 0.291 0.265 0.317 0.326 0.372 0.319 0.365 0.699 0.601
+> PEMS03 0.097 0.208 0.146 0.260 0.122 0.233 0.149 0.261 0.126 0.230 0.106 0.223 0.316 0.370 0.216 0.322 0.152 0.275 0.411 0.475 0.122 0.226
+> PEMS08 0.141 0.237 0.171 0.271 0.149 0.247 0.174 0.275 0.152 0.243 0.153 0.258 0.318 0.378 0.249 0.332 0.226 0.312 0.422 0.456 0.240 0.261
+
+Note : We fix the input length as 96 following [ 28 ]. Bold and underlined denote best and second-best results, respectively. Avg indicates average results over forecast horizons: T=96, 192, 336 and 720. Time-o1 employs the top-performing baseline on each dataset as its underlying forecast model. 
+
+4.1 Setup Datasets. In this work, we conduct experiments on ETT (4 subsets), ECL, Traffic, Weather, and PEMS [ 28 ] for long-term forecasting task, and M4 for short-term forecasting task [ 58 ]. All datasets are split chronologically into training, validation, and testing sets following their official settings. 
+
+Baselines. We compare Time-o1 with a range of established models, including Transformer [ 45 ], Autoformer [ 59 ], FEDformer [ 71 ], iTransformer [ 28 ], Fredformer [ 37 ], DLinear [ 67 ], TiDE [ 5], FreTS [ 64 ], TimesNet [ 58 ], and MICN [ 54 ]. As a loss function, Time-o1 is model-agnostic and can be integrated with any model architecture. By default, Time-o1 employs the best-performing baseline model on each dataset as its underlying model architecture for fair comparison. 
+
+Implementation. The baseline models are reproduced using the scripts provided by Fredformer [ 37 ]. All baseline models are trained using the Adam [ 14 ] optimizer to minimize LMSE in (1) . Following the prestigious benchmark [ 38 ], the dropping-last trick is disabled during the test phase. When integrating Time-o1 to enhance an established model, we adhere to the associated hyperparameter settings in the public benchmark [ 37 , 28 ], only tuning α, γ and learning rate conservatively. Experiments are conducted on Intel(R) Xeon(R) Platinum 8383C CPUs and NVIDIA RTX H100 GPUs. 
+
+4.2 Overall performance 
+
+Table 1 presents the long-term forecasting results. Time-o1 consistently improves base model performance. For example, on ETTh1, it reduces Fredformer’s MSE by 0.016. Similar gains across other datasets further validate its effectiveness. These results suggest that modifying the loss function can yield improvements comparable to, or even exceeding, those from architectural advancements. We attribute this to two key aspects of Time-o1: its decorrelation property for eliminating autocorrelation bias and its discrimination on significant components for simplifying optimization. 
+
+Showcases. We visualize the forecast sequences and the generated components to showcase the improvements of Time-o1 in forecast quality. A snapshot on ETTm2 with historical window H = 96 
+
+and forecast horizon T = 336 is depicted in Fig. 2. Although the model trained using canonical DF captures general trends, its forecast struggles with large variations (e.g., peaks within steps 100-400). This reflects its difficulty in modeling significant, high-variance components. In contrast, Time-o1, by explicitly discriminating and aligning these significant components, generates a forecast that accurately captures these large variations, including the peaks within steps 100-400. 60 100 200 300 400     
+
+> −1.5
+> −1.0
+> −0.5
+> 0.0
+> GroundTruth
+> Prediction 010 20 30 40
+> −20
+> −15
+> −10
+> −5
+> 0
+> 5
+> GroundTruth
+> Prediction
+
+(a) The generated forecast with DF. 0 100 200 300 400      
+
+> −1.5
+> −1.0
+> −0.5
+> 0.0
+> GroundTruth
+> Prediction 010 20 30 40
+> −20
+> −15
+> −10
+> −5
+> 0
+> 5
+> GroundTruth
+> Prediction
+
+(b) The generated forecast with Time-o1. 
+
+Figure 2: The visualization of label and forecast sequences generated by models trained with TMSE versus Time-o1. In both (a) and (b), the left panels display the time-domain sequences ( Y and ˆY), while the right panels illustrate their corresponding latent components ( Z and ˆZ). Table 2: Comparable results with other loss functions for time-series forecast.                                                                                                                                          
+
+> Loss Time-o1 FreDF Koopman Dilate Soft-DTW DPTA DF Metrics MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE Fredformer  ETTm1 0.379 0.393 0.384 0.394 0.389 0.400 0.389 0.400 0.397 0.402 0.396 0.402 0.387 0.398 ETTh1 0.431 0.429 0.438 0.434 0.452 0.443 0.453 0.442 0.460 0.449 0.460 0.449 0.447 0.434 ECL 0.178 0.270 0.179 0.272 0.190 0.282 0.187 0.280 0.206 0.298 0.202 0.294 0.191 0.284 Weather 0.255 0.276 0.256 0.277 0.257 0.279 0.258 0.280 0.261 0.280 0.260 0.280 0.261 0.282 iTransformer  ETTm1 0.395 0.401 0.405 0.405 0.413 0.416 0.407 0.412 0.417 0.415 0.416 0.415 0.411 0.414 ETTh1 0.438 0.434 0.442 0.437 0.455 0.451 0.452 0.448 0.470 0.457 0.463 0.454 0.452 0.448 ECL 0.170 0.260 0.176 0.264 0.178 0.269 0.178 0.269 0.175 0.266 0.177 0.267 0.179 0.270 Weather 0.251 0.272 0.257 0.276 0.289 0.313 0.286 0.309 0.292 0.316 0.291 0.313 0.269 0.289
+> Note :Bold and underlined denote best and second-best results, respectively. The reported results are averaged over forecast horizons: T=96, 192, 336 and 720.
+
+4.3 Loss function comparison 
+
+Table 2 compares Time-o1 against other time-series loss functions: FreDF [ 51 ], Koopman [ 17 ], Di-late [ 18 ], Soft-DTW [ 4], and DPTA [ 42 ]. We integrate their official implementations into Fredformer and iTransformer. Overall, shape alignment losses (Dilate, Soft-DTW, DPTA) offer little performance gain over canonical DF (using TMSE loss), consistent with the findings in [ 18 ]. This phenomenon is rationalized by the fact that they do not mitigate the label autocorrelation nor reduce task amounts for simplifying optimization. FreDF improves performance by partly addressing autocorrelation bias. However, as discussed in Section 3.1, FreDF does not fully eliminate this bias, nor does it distinguish significant components to simplify the optimization landscape. Time-o1 directly addresses these two limitations of FreDF, leading to its superior overall performance. 
+
+4.4 Ablation studies 
+
+Table 3 presents an ablation study dissecting the contributions of critical factors in Time-o1: the decorrelation property and the task reduction effect. The main findings are summarized as follows. • Time-o1 † improves DF by reducing the number of tasks to optimize. To this end, it employs a randomized matrix as the projection matrix to generate components and aligns only a subset of the obtained components. The involution ratio γ is finetuned on the validation set. It consistently improves over DF (e.g., −0.012 MAE on Weather). This demonstrates that reducing tasks with a minimal loss of label information can reduce optimization difficulty and improve performance. • Time-o1 ‡ improves DF by aligning decorrelated components. To this end, the loss function is calculated in (5) with γ = 1 . It also outperforms DF, achieving the second-best results overall. This demonstrates aligning decorrelated label components to mitigate bias benefits forecast performance. • Time-o1 integrates both factors above by aligning the most significant decorrelated components and achieves the best overall performance, demonstrating the synergistic effect of these two factors. 7Table 3: Ablation study results.                                                                                                                                                                                          
+
+> Model Decorrelation Reduction Data T=96 T=192 T=336 T=720 Avg MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE DF %%
+> ETTm1 0.326 0.361 0.365 0.382 0.396 0.404 0.459 0.444 0.387 0.398 ETTh1 0.377 0.396 0.437 0.425 0.486 0.449 0.488 0.467 0.447 0.434 ECL 0.150 0.242 0.168 0.259 0.182 0.274 0.214 0.304 0.179 0.270 Weather 0.174 0.228 0.213 0.266 0.270 0.316 0.337 0.362 0.249 0.293 Time-o1 †%!
+> ETTm1 0.338 0.366 0.369 0.383 0.397 0.403 0.458 0.441 0.391 0.398 ETTh1 0.376 0.395 0.437 0.430 0.478 0.450 0.469 0.467 0.440 0.436 ECL 0.150 0.239 0.164 0.253 0.178 0.268 0.210 0.296 0.175 0.264 Weather 0.170 0.216 0.213 0.259 0.262 0.300 0.332 0.351 0.244 0.281 Time-o1 ‡!%
+> ETTm1 0.324 0.359 0.362 0.379 0.390 0.400 0.451 0.438 0.382 0.394 ETTh1 0.373 0.395 0.433 0.423 0.476 0.445 0.474 0.463 0.439 0.431 ECL 0.147 0.238 0.162 0.252 0.174 0.267 0.205 0.294 0.172 0.263 Weather 0.172 0.220 0.211 0.259 0.261 0.301 0.331 0.353 0.244 0.283 Time-o1 !!
+> ETTm1 0.321 0.357 0.360 0.378 0.389 0.400 0.447 0.435 0.379 0.393
+> ETTh1 0.368 0.391 0.424 0.422 0.467 0.441 0.465 0.463 0.431 0.429
+> ECL 0.145 0.235 0.159 0.249 0.173 0.264 0.203 0.292 0.170 0.260
+> Weather 0.169 0.219 0.210 0.258 0.259 0.297 0.327 0.349 0.241 0.280
+
+Note : Bold and underlined denote best and second-best results, respectively. 
+
+Table 4: Varying transformations results. 
+
+ECL Weather Transformation MSE ∆ MAE ∆ MSE ∆ MAE ∆
+
+None 0.179 - 0.270 - 0.249 - 0.293 -RPCA 0.171 4.31% ↓ 0.261 3.16% ↓ 0.244 1.78% ↓ 0.286 2.38% ↓
+
+SVD 0.175 2.24% ↓ 0.264 2.18% ↓ 0.248 0.34% ↓ 0.290 0.93% ↓
+
+FA 0.175 2.35% ↓ 0.265 1.82% ↓ 0.245 1.35% ↓ 0.287 1.97% ↓
+
+Ours 0.170 4.86% ↓ 0.260 3.57% ↓ 0.241 2.94% ↓ 0.280 4.28% ↓
+
+Note : ∆ refers to the relative error reduction compared to the baseline (None). Bold and underlined denote best and second-best results. 
+
+4.5 Generalization studies 
+
+In this section, we investigate the utility of Time-o1 with different transformation strategies and forecast models, to showcase the generality of Time-o1. In the bar-plots, the forecast errors are averaged over forecast lengths (96, 192, 336, 720), with error bars as 50% confidence intervals. 
+
+Varying transformations. We select alternative approaches to transform the label sequence into latent components and report the forecast performance in Table 4. The selected transformation methods include robust principal component analysis (RPCA) [ 1], SVD [ 7 ], and factor analysis [ 15 ]. Noting that the output of SVD yields components here, not a projection matrix as in Section 3.2. Implementation details are in Appendix C. Overall, all these transformation methods outperform canonical DF without transformation. However, the components obtained by these methods, including RPCA, cannot be guaranteed to be decorrelated. Consequently, autocorrelation bias may persist. In contrast, our approach ensures full decorrelation of the derived components (see Lemma 3.2), effectively addressing autocorrelation bias and leading to the best overall performance. 
+
+Varying forecast models. We explore the versatility of Time-o1 in augmenting representative forecast models: Fredformer [ 37 ], iTransformer [ 28 ], FreTS [ 64 ], and DLinear [ 67 ]. As illustrated in Fig. 3, Time-o1 improves forecast performance in all cases. For instance, on the Weather dataset, iTransformer and FreTS with Time-o1 achieve substantial reductions in MSE—up to 6.9% and 2.9%, respectively. Further evidence of Time-o1’s versatility can be found in Appendix E.4. These results confirm Time-o1’s potential as a plug-and-play strategy to enhance diverse forecast models. 
+
+4.6 Hyperparameter sensitivity 
+
+In this section, we examine the impact of critical hyperparameters on the performance of Time-o1. The results are presented in Table 5 and Table 6. Additional trends across different datasets and forecast lengths are provided in Appendix E.5. The primary observations are summarized as follows: • The coefficient α determines the relative importance of the proposed transform-enhanced loss in (5) . When α is set to 1, Time-o1 exclusively uses the transform-enhanced loss. Overall, increasing 
+
+α from 0 to 1 leads to improved forecast accuracy, with the best results typically achieved when 8Fred. iTrans. FreTS DLine. 
+
+> 0.16
+> 0.18
+> 0.20
+> 0.22
+> 0.24
+> MSE  -6.9%
+> -4.9%
+> -0.9%
+> -1.2%
+> with Time-o1
+> w/o Time-o1
+
+(a) ECL with MSE Fred. iTrans. FreTS DLine.  
+
+> 0.26
+> 0.28
+> 0.30
+> 0.32
+> MAE  -5.0%
+> -3.6%
+> -1.3%
+> -2.0%
+> with Time-o1
+> w/o Time-o1
+
+(b) ECL with MAE Fred. iTrans. FreTS DLine.   
+
+> 0.24
+> 0.27
+> 0.30
+> 0.33
+> MSE  -2.2% -6.9%
+> -2.9%
+> -1.2%
+> with Time-o1
+> w/o Time-o1
+
+(c) Weather with MSE Fred. iTrans. FreTS DLine.    
+
+> 0.26
+> 0.28
+> 0.30
+> 0.32
+> 0.34
+> MAE  -2.1% -5.8% -4.3%
+> -3.0% with Time-o1
+> w/o Time-o1
+
+(d) Weather with MAE 
+
+Figure 3: Improvement of Time-o1 applied to different forecast models, shown with colored bars for means over forecast lengths (96, 192, 336, 720) and error bars for 50% confidence intervals. Table 5: Hyperparameter results on α.                                        
+
+> ETTm1 ETTh2 Weather
+> αMSE MAE MSE MAE MSE MAE 00.3867 0.3979 0.3766 0.4019 0.2486 0.2930 0.3 0.3871 0.3983 0.3742 0.3982 0.2439 0.2851 0.5 0.3864 0.3976 0.3703 0.3964 0.2432 0.2833
+> 0.7 0.3831 0.3959 0.3674 0.3943 0.2433 0.2849 10.3850 0.3933 0.3606 0.3890 0.2753 0.3209
+> Note :Bold and underlined denote best and second-best results.
+
+Table 6: Hyperparameter results on γ.                                        
+
+> ETTm1 ETTh2 Weather
+> γMSE MAE MSE MAE MSE MAE 0.1 0.3915 0.4002 0.3816 0.4029 0.2437 0.2845 0.3 0.3849 0.3964 0.3694 0.3961 0.2424 0.2825
+> 0.5 0.3817 0.3943 0.3651 0.3923 0.2466 0.2877 0.7 0.3798 0.3930 0.3603 0.3886 0.2443 0.2861 10.3814 0.3940 0.3624 0.3903 0.2491 0.2924
+> Note :Bold and underlined denote best and second-best results.
+
+α is close to 1. The performance improvement is significant, e.g., MSE reduction on ETTh2 by 0.016, showcasing the utility of the transform-enhanced loss to improve forecast performance. • The coefficient γ determines the ratio of retained components for training. The results demonstrate that preserving all label information ( γ = 1 ) does not necessarily yield optimal performance. Instead, the best results are obtained at γ < 1, such as 0.7 on ETTs and 0.3 on Weather. This phe-nomenon can be attributed to the trade-off between information loss and optimization complexity: by focusing on the top components, optimization is simplified due to reduced task amount. Besides, since the top components contain most information, the information loss by dropping the other components is negligible. These factors synergistically contribute to improved performance. 
+
+5 Conclusion 
+
+In this study, we highlight the importance of designing loss functions for training time-series fore-casting models. Two critical challenges are formulated: label autocorrelation, which induces bias, and number of tasks, which determines optimization complexity. To address these challenges, we introduce a model-agnostic loss function called Time-o1. This method transforms the label sequence into decorrelated components with discernible significance. Then, it trains forecast models to align the most significant components, which simultaneously mitigates label autocorrelation and reduces task amount. Empirically, Time-o1 improves forecast performance across diverse datasets. 
+
+Limitations & future works. In this work, we investigate the challenges of label autocorrelation and excessive number of tasks in time-series forecasting. Nevertheless, these issues also manifest in areas such as speech generation, target recognition, and dense image prediction. Applying Time-o1 in these contexts is a promising avenue for future research. Additionally, history sequence also exhibits autocorrelation and contains redundancy. Transforming inputs to derive decorrelated, compact representations could offer additional performance gains and also warrants investigation. 
+
+Acknowledgments 
+
+Z. Lin was supported by the NSF China (No. 62276004) and the State Key Laboratory of General Artificial Intelligence. H. Li was supported by National Natural Science Foundation of China (623B2002). 9References 
+
+[1] HanQin Cai, Jian-Feng Cai, and Ke Wei. Accelerated alternating projections for robust principal component analysis. Journal of Machine Learning Research , 20(20):1–33, 2019. [2] Defu Cao, Yujing Wang, Juanyong Duan, Ce Zhang, Xia Zhu, Congrui Huang, Yunhai Tong, Bixiong Xu, Jing Bai, Jie Tong, et al. Spectral temporal graph neural network for multivariate time-series forecasting. In Proc. Adv. Neural Inf. Process. Syst. , volume 33, pages 17766–17778, 2020. [3] Zhichao Chen, Leilei Ding, Zhixuan Chu, Yucheng Qi, Jianmin Huang, and Hao Wang. Monotonic neural ordinary differential equation: Time-series forecasting for cumulative data. In Proc. ACM Int. Conf. Inf. Knowl. Manag. , pages 4523–4529, 2023. [4] Marco Cuturi and Mathieu Blondel. Soft-dtw: a differentiable loss function for time-series. In Proc. Int. Conf. Mach. Learn. , pages 894–903. PMLR, 2017. [5] Abhimanyu Das, Weihao Kong, Andrew Leach, Rajat Sen, and Rose Yu. Long-term forecasting with tide: Time-series dense encoder. Trans. Mach. Learn. Res. , 2023. [6] Ur ˇska Dem ˇsar, Paul Harris, Chris Brunsdon, A Stewart Fotheringham, and Sean McLoone. Principal component analysis on spatial data: an overview. Ann. Assoc. Am. Geogr. , 103(1):106–128, 2013. [7] Andrew Gibiansky. Cool linear algebra: Singular value decomposition. Andrew Gibiansky Blog , 29, 2013. [8] Michael Greenacre, Patrick JF Groenen, Trevor Hastie, Alfonso Iodice d’Enza, Angelos Markos, and Elena Tuzhilina. Principal component analysis. Nat. Rev. Methods Primers , 2(1):100, 2022. [9] Albert Gu and Tri Dao. Mamba: Linear-time sequence modeling with selective state spaces. In Proc. Conf. Lang. Model. , 2023. [10] Albert Gu, Karan Goel, and Christopher Re. Efficiently modeling long sequences with structured state spaces. In Proc. Int. Conf. Learn. Represent. , 2021. [11] Qihe Huang, Lei Shen, Ruixin Zhang, Jiahuan Cheng, Shouhong Ding, Zhengyang Zhou, and Yang Wang. Hdmixer: Hierarchical dependency with extendable patch for multivariate time series forecasting. In Proc. AAAI Conf. Artif. Intell. , volume 38, pages 12608–12616, 2024. [12] Qihe Huang, Zhengyang Zhou, , Yangze Li, Kuo Yang, Binwu Wang, and Yang Wang. Many minds, one goal: Time series forecasting via sub-task specialization and inter-agent cooperation. In Proc. Adv. Neural Inf. Process. Syst. , 2025. [13] Qihe Huang, Zhengyang Zhou, Kuo Yang, Zhongchao Yi, Xu Wang, and Yang Wang. Timebase: The power of minimalism in efficient long-term time series forecasting. In Proc. Int. Conf. Mach. Learn. , 2025. [14] Diederik P. Kingma and Jimmy Ba. Adam: A method for stochastic optimization. In Proc. Int. Conf. Learn. Represent. , pages 1–9, 2015. [15] Paul Kline. An easy guide to factor analysis . Routledge, 2014. [16] Yaxuan Kong, Zepu Wang, Yuqi Nie, Tian Zhou, Stefan Zohren, Yuxuan Liang, Peng Sun, and Qingsong Wen. Unlocking the power of lstm for long term time series forecasting. In Proc. AAAI Conf. Artif. Intell. ,volume 39, pages 11968–11976, 2025. [17] Henning Lange, Steven L Brunton, and J Nathan Kutz. From fourier to koopman: Spectral methods for long-term time series prediction. Journal of Machine Learning Research , 22(41):1–38, 2021. [18] Vincent Le Guen and Nicolas Thome. Shape and time distortion loss for training deep time series forecasting models. In Proc. Adv. Neural Inf. Process. Syst. , volume 32, 2019. [19] Vincent Le Guen and Nicolas Thome. Probabilistic time series forecasting with shape and temporal diversity. Proc. Adv. Neural Inf. Process. Syst. , 33:4427–4440, 2020. [20] Chen Li, Hongyang Zhang, Saqlain Abbas, Chenyu Ma, Yinhao Liu, and Xiaotong Tu. Panda: Patch-aware graph network with dual alignment for time series forecasting. In Proc. IEEE Int. Conf. Acoust. Speech Signal Process. , pages 1–5, 2025. [21] Haoxuan Li, Chunyuan Zheng, Shuyi Wang, Kunhan Wu, Eric Wang, Peng Wu, Zhi Geng, Xu Chen, and Xiao-Hua Zhou. Relaxing the accurate imputation assumption in doubly robust learning for debiased collaborative filtering. In Proc. Int. Conf. Mach. Learn. , volume 235, pages 29448–29460, 2024. 
+
+10 [22] Jianxin Li, Xiong Hui, and Wancai Zhang. Informer: Beyond efficient transformer for long sequence time-series forecasting. In Proc. AAAI Conf. Artif. Intell. , 2021. [23] Xinyu Li, Yuchen Luo, Hao Wang, Haoxuan Li, Liuhua Peng, Feng Liu, Yandong Guo, Kun Zhang, and Mingming Gong. Towards accurate time series forecasting via implicit decoding. Proc. Adv. Neural Inf. Process. Syst. , 2025. [24] Zhe Li, Xiangfei Qiu, Peng Chen, Yihang Wang, Hanyin Cheng, Yang Shu, Jilin Hu, Chenjuan Guo, Aoying Zhou, Christian S Jensen, et al. Tsfm-bench: A comprehensive and unified benchmark of foundation models for time series forecasting. In Proc. ACM SIGKDD Int. Conf. Knowl. Discovery Data Mining ,pages 5595–5606, 2025. [25] Zhe Li, Xiangfei Qiu, Peng Chen, Yihang Wang, Hanyin Cheng, Yang Shu, Jilin Hu, Chenjuan Guo, Aoying Zhou, Qingsong Wen, et al. Foundts: Comprehensive and unified benchmarking of foundation models for time series forecasting. arXiv preprint arXiv:2410.11802 , 2024. [26] Bo Liu, Xingchao Liu, Xiaojie Jin, Peter Stone, and Qiang Liu. Conflict-averse gradient descent for multi-task learning. Proc. Adv. Neural Inf. Process. Syst. , 34:18878–18890, 2021. [27] Minhao Liu, Ailing Zeng, Muxi Chen, Zhijian Xu, Qiuxia Lai, Lingna Ma, and Qiang Xu. Scinet: time series modeling and forecasting with sample convolution and interaction. In Proc. Adv. Neural Inf. Process. Syst. , 2022. [28] Yong Liu, Tengge Hu, Haoran Zhang, Haixu Wu, Shiyu Wang, Lintao Ma, and Mingsheng Long. itrans-former: Inverted transformers are effective for time series forecasting. In Proc. Int. Conf. Learn. Represent. ,2024. [29] Jiaming Ma, Zhiqing Cui, Binwu Wang, Pengkun Wang, Zhengyang Zhou, Zhe Zhao, and Yang Wang. Causal learning meet covariates: Empowering lightweight and effective nationwide air quality forecasting. 
+
+Proc. Int. Joint Conf. Artif. Intell. , 2025. [30] Jiaming Ma, Binwu Wang, Qihe Huang, Guanjun Wang, Pengkun Wang, Zhengyang Zhou, and Yang Wang. Mofo: Empowering long-term time series forecasting with periodic pattern modeling. In Proc. Adv. Neural Inf. Process. Syst. , 2025. [31] Jiaming Ma, Binwu Wang, Guanjun Wang, Kuo Yang, Zhengyang Zhou, Pengkun Wang, Xu Wang, and Yang Wang. Less but more: Linear adaptive graph learning empowering spatiotemporal forecasting. In 
+
+Proc. Adv. Neural Inf. Process. Syst. , 2025. [32] Jiaming Ma, Binwu Wang, Pengkun Wang, Zhengyang Zhou, Xu Wang, and Yang Wang. Bist: A lightweight and efficient bi-directional model for spatiotemporal prediction. Proc. VLDB Endow. ,18(6):1663–1676, 2025. [33] Jiaming Ma, Binwu Wang, Pengkun Wang, Zhengyang Zhou, Yudong Zhang, Xu Wang, and Yang Wang. Mobimixer: A multi-scale spatiotemporal mixing model for mobile traffic prediction. IEEE Trans. Mob. Comput. , 2025. [34] Gonzalo Mateos, Santiago Segarra, Antonio G. Marques, and Alejandro Ribeiro. Connecting the dots: Identifying network structure via graph signal processing. IEEE Signal Process. Mag. , 36(3):16–43, 2019. [35] Yuqi Nie, Nam H Nguyen, Phanwadee Sinthong, and Jayant Kalagnanam. A time series is worth 64 words: Long-term forecasting with transformers. In Proc. Int. Conf. Learn. Represent. , 2023. [36] Karl Pearson. Principal components analysis. The London, Edinburgh, and Dublin Philosophical Magazine and Journal of Science , 6(2):559, 1901. [37] Xihao Piao, Zheng Chen, Taichi Murayama, Yasuko Matsubara, and Yasushi Sakurai. Fredformer: Frequency debiased transformer for time series forecasting. In Proc. ACM SIGKDD Int. Conf. Knowl. Discovery Data Mining , pages 2400–2410, 2024. [38] Xiangfei Qiu, Jilin Hu, Lekui Zhou, Xingjian Wu, Junyang Du, Buang Zhang, Chenjuan Guo, Aoying Zhou, Christian S. Jensen, Zhenli Sheng, and Bin Yang. Tfb: Towards comprehensive and fair benchmarking of time series forecasting methods. In Proc. VLDB Endow. , pages 2363–2377, 2024. [39] Xiangfei Qiu, Xiuwen Li, Ruiyang Pang, Zhicheng Pan, Xingjian Wu, Liu Yang, Jilin Hu, Yang Shu, Xuesong Lu, Chengcheng Yang, Chenjuan Guo, Aoying Zhou, Christian S. Jensen, and Bin Yang. Easytime: Time series forecasting made easy. In Proc. IEEE Int. Conf. Data Eng. , 2025. 
+
+11 [40] Xiangfei Qiu, Xingjian Wu, Hanyin Cheng, Xvyuan Liu, Chenjuan Guo, Jilin Hu, and Bin Yang. Dbloss: Decomposition-based loss function for time series forecasting. Proc. Adv. Neural Inf. Process. Syst. , 2025. [41] Xiangfei Qiu, Xingjian Wu, Yan Lin, Chenjuan Guo, Jilin Hu, and Bin Yang. Duet: Dual clustering enhanced multivariate time series forecasting. In Proc. ACM SIGKDD Int. Conf. Knowl. Discovery Data Mining , pages 1185–1196, 2025. [42] Hiroaki Sakoe and Seibi Chiba. Dynamic programming algorithm optimization for spoken word recognition. 
+
+IEEE Trans. Signal Process. , 26(1):43–49, 2003. [43] Gilbert Strang. Introduction to linear algebra . SIAM, 2016. [44] William Toner and Luke Nicholas Darlow. An analysis of linear time series forecasting models. In Proc. Int. Conf. Mach. Learn. , pages 48404–48427. PMLR, 2024. [45] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Proc. Adv. Neural Inf. Process. Syst. , 2017. [46] Hao Wang, Zhichao Chen, Jiajun Fan, Haoxuan Li, Tianqiao Liu, Weiming Liu, Quanyu Dai, Yichao Wang, Zhenhua Dong, and Ruiming Tang. Optimal transport for treatment effect estimation. In Proc. Adv. Neural Inf. Process. Syst. , volume 36, pages 5404–5418, 2023. [47] Hao Wang, Zhichao Chen, Zhaoran Liu, Xu Chen, Haoxuan Li, and Zhouchen Lin. Proximity matters: Local proximity enhanced balancing for treatment effect estimation. Proc. ACM SIGKDD Int. Conf. Knowl. Discovery Data Mining , 2025. [48] Hao Wang, Zhichao Chen, Zhaoran Liu, Licheng Pan, Hu Xu, Yilin Liao, Haozhe Li, and Xinggao Liu. Spot-i: Similarity preserved optimal transport for industrial iot data imputation. IEEE Trans. Ind. Informat. ,20(12):14421–14429, 2024. [49] Hao Wang, Zhichao Chen, Yuan Shen, Hui Zheng, Degui Yang, Dangjun Zhao, and Buge Liang. Unbiased recommender learning from implicit feedback via weakly supervised learning. In IEEE Trans. Neural Netw. Learn. Syst. , 2025. [50] Hao Wang, Xinggao Liu, Zhaoran Liu, Haozhe Li, Yilin Liao, Yuxin Huang, and Zhichao Chen. Lspt-d: Local similarity preserved transport for direct industrial data imputation. IEEE Trans. Autom. Sci. Eng. ,22:9438–9448, 2025. [51] Hao Wang, Licheng Pan, Yuan Shen, Zhichao Chen, Degui Yang, Yifei Yang, Sen Zhang, Xinggao Liu, Haoxuan Li, and Dacheng Tao. Fredf: Learning to forecast in the frequency domain. In Proc. Int. Conf. Learn. Represent. , pages 1–9, 2025. [52] Hao Wang, Zhiyu Wang, Yunlong Niu, Zhaoran Liu, Haozhe Li, Yilin Liao, Yuxin Huang, and Xinggao Liu. An accurate and interpretable framework for trustworthy process monitoring. IEEE Trans. Artif. Intell ,5(5):2241–2252, 2023. [53] Haotian Wang, Haoxuan Li, Hao Zou, Haoang Chi, Long Lan, Wanrong Huang, and Wenjing Yang. Effective and efficient time-varying counterfactual prediction with state-space models. In Proc. Int. Conf. Learn. Represent. , 2025. [54] Huiqiang Wang, Jian Peng, Feihu Huang, Jince Wang, Junhui Chen, and Yifei Xiao. Micn: Multi-scale local and global context modeling for long-term series forecasting. In Proc. Int. Conf. Learn. Represent. ,2023. [55] Pengcheng Wang, Xiang Ma, Lizhen Cui, and Xuemei Li. Tscg: Efficient grouped channel interaction for multivariate time series forecasting. Expert Syst. Appl , page 130299, 2025. [56] Yuxuan Wang, Haixu Wu, Jiaxiang Dong, Yong Liu, Mingsheng Long, and Jianmin Wang. Deep time series models: A comprehensive survey and benchmark. arXiv preprint arXiv:2407.13278 , 2024. [57] Qingsong Wen, Tian Zhou, Chaoli Zhang, Weiqi Chen, Ziqing Ma, Junchi Yan, and Liang Sun. Transform-ers in time series: a survey. In Proc. Int. Joint Conf. Artif. Intell. , pages 6778–6786, 2023. [58] Haixu Wu, Tengge Hu, Yong Liu, Hang Zhou, Jianmin Wang, and Mingsheng Long. Timesnet: Temporal 2d-variation modeling for general time series analysis. In Proc. Int. Conf. Learn. Represent. , 2023. [59] Haixu Wu, Jiehui Xu, Jianmin Wang, and Mingsheng Long. Autoformer: Decomposition transformers with Auto-Correlation for long-term series forecasting. In Proc. Adv. Neural Inf. Process. Syst. , 2021. 
+
+12 [60] Xingjian Wu, Zhengyu Li, Hanyin Cheng, Xiangfei Qiu, Jilin Hu, Chenjuan Guo, and Bin Yang. Unlocking the power of mixture-of-experts for task-aware time series analytics. arXiv preprint arXiv:2509.22279 ,2025. [61] Xingjian Wu, Xiangfei Qiu, Hongfan Gao, Jilin Hu, Bin Yang, and Chenjuan Guo. K2vae: A koopman-kalman enhanced variational autoencoder for probabilistic time series forecasting. In Proc. Int. Conf. Mach. Learn. , 2025. [62] Xinle Wu, Xingjian Wu, Dalin Zhang, Miao Zhang, Chenjuan Guo, Bin Yang, and Christian S Jensen. Fully automated correlated time series forecasting in minutes. Proc. VLDB Endow. , 18(2):144–157, 2024. [63] Zhijian Xu, Ailing Zeng, and Qiang Xu. Fits: Modeling time series with 10 k parameters. In Proc. Int. Conf. Learn. Represent. , 2024. [64] Kun Yi, Qi Zhang, Wei Fan, Shoujin Wang, Pengyang Wang, Hui He, Ning An, Defu Lian, Longbing Cao, and Zhendong Niu. Frequency-domain mlps are more effective learners in time series forecasting. In Proc. Adv. Neural Inf. Process. Syst. , 2023. [65] Wenzhen Yue, Yong Liu, Haoxuan Li, Hao Wang, Xianghua Ying, Ruohao Guo, Bowei Xing, and Ji Shi. Olinear: A linear model for time series forecasting in orthogonally transformed domain. Proc. Adv. Neural Inf. Process. Syst. , 2025. [66] Wenzhen Yue, Yong Liu, Xianghua Ying, Bowei Xing, Ruohao Guo, and Ji Shi. Freeformer: Frequency enhanced transformer for multivariate time series forecasting. In Proc. Int. Joint Conf. Artif. Intell. , pages 3606–3614, 2025. [67] Ailing Zeng, Muxi Chen, Lei Zhang, and Qiang Xu. Are transformers effective for time series forecasting? In Proc. AAAI Conf. Artif. Intell. , 2023. [68] Weijia Zhang, Le Zhang, Jindong Han, Hao Liu, Yanjie Fu, Jingbo Zhou, Yu Mei, and Hui Xiong. Irregular traffic time series forecasting based on asynchronous spatio-temporal graph convolutional networks. In 
+
+Proc. ACM SIGKDD Int. Conf. Knowl. Discovery Data Mining , pages 4302–4313, 2024. [69] Yu Zhang and Qiang Yang. A survey on multi-task learning. IEEE Trans. Knowl. Data Eng. , 34(12):5586– 5609, 2021. [70] Yungeng Zhang, Yuan Chang, Xiaohou Shi, Yaqi Song, Feng Wang, and Mingchuan Yang. Adapting large language models to forecast in frequency domain. In Proc. IEEE Int. Conf. Acoust. Speech Signal Process. ,pages 1–5, 2025. [71] Tian Zhou, Ziqing Ma, Qingsong Wen, Xue Wang, Liang Sun, and Rong Jin. FEDformer: Frequency enhanced decomposed transformer for long-term series forecasting. In Proc. Int. Conf. Mach. Learn. , 2022. 
+
+13 A On the Implementation Details of Label Correlation Estimation 
+
+In this section, we introduce the motivation and implementation details of the label autocorrelation estimation techniques in Fig. 1. Measuring label autocorrelation yt → yt′ is indeed challenging due to the presence of confounding effect [ 47 , 46 , 21 ]. Specifically, the fork structure yt ← x → yt′
+
+introduces spurious correlations between yt and yt′ , thereby distorting the true strength of the label autocorrelation yt → yt′ of interest. This structural confounding undermines the validity of traditional measures such as Pearson correlation for quantifying label autocorrelation. The previous work [ 51 ] employs the double machine learning (DML) method to estimate the ground-truth correlation while mitigating the influence of the fork structure. We adopt this in our experiments. DML is a statistical technique designed to estimate the causal effect of a treatment on an outcome while controlling for fork variables. Specifically, suppose we have a treatment variable T , an outcome variable Y, and a set of fork variables X . The goal is to estimate the causal effect of T on Y while controlling for the influence of X . To this end, DML first orthogonalizes both the treatment and outcome with respect to the fork variables. Two parametric models are employed to predict the treatment and outcome based on the fork variables. These predictions capture the impact of X on Y
+
+and T . Subsequently, such impact of X is eliminated by calculating the residuals. Finally, the DML method regresses the outcome residuals on the treatment residuals, thereby measuring the causal effect of T on Y while removing the influence of the fork variables. In our experiments, we measure label autocorrelation by treating the input sequence x as the fork variable and different steps of the label sequences yt and yt′ as the treatment and outcome variables, respectively. Then, we estimate the treatment effect of yt on yt′ controlling x. Similarly, when measuring the correlation between different components, we use different components zk and zk′ as the treatment and outcome variables. Linear regression model is employed as the parametric model for both the treatment and outcome variables for efficiency, which is consistent with [51]. 0
+
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 0
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 0
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 0
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+
+(a) Correlation between different steps in label sequence. 0
+
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 0
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 0
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 0
+> 12
+> 24
+> 36
+> 48
+> 60
+> 72
+> 84
+> 96
+> 012 24 36 48 60 72 84 96  0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+
+(b) Correlation between different extracted components. 
+
+Figure 4: The label autocorrelation in the original label sequence and the extracted components. The datasets are ETTh1, ETTh2, ETTm1, and Weather from left to right. The forecast length is set to 96. To further complement the case study in Fig. 1, we analyzed the correlation matrices of the label sequences and the extracted components across multiple datasets, with the results presented in Fig. 4. The main observations are summarized as follows. • Panel (a) displays the correlation matrix of the label sequence, characterized by substantial non-diagonal elements, which highlight the strong autocorrelation among the labels. In contrast, panel (b) shows the correlation matrix of the extracted components, where the non-diagonal elements are nearly zero, indicating effective decorrelation. • Compared to the results reported in [ 51 ], where some obtained components remain correlated, the non-diagonal elements in panel (b) are fully eliminated. This difference arises because the Fourier transform in [51] achieves decorrelation only when the original label sequence is nearly infinitely long ( T → ∞ ), a condition that is not met in real-world applications with finite forecast horizons. 14 This limitation stems from the predefined nature of the projection matrix, which lacks adaptation to the specific properties of the data. In contrast, our method ensures decorrelation by solving a constrained optimization problem, without relying on an infinitely long forecast horizon, thereby providing a more reliable approach for handling autocorrelation bias. 
+
+B Theoretical Justification 
+
+Theorem B.1 (Autocorrelation bias, Theorem 3.1 in the main text) . Given a univariate label sequence 
+
+y ∈ RT where Σ ∈ RT×T denotes the step-wise correlation coefficient, the loss function LMSE 
+
+in (1) is biased from the true negative log-likelihood of the label sequence, which is given by: 
+
+Bias = ∥y − ˆy∥2 
+
+> Σ−1
+
+− ∥ y − ˆy∥2 − 12 log |Σ| . (6) 
+
+where ∥v∥2 
+
+> Σ−1
+
+= v⊤Σ−1v. The bias vanishes if different steps in y are decorrelated. 5
+
+Proof. The proof follows our previous work [51] but relaxes the first-order Markov assumption. Suppose the label sequence follows a multivariate normal distribution with mean vector μ = ˆ y and covariance matrix Σ, where the off-diagonal entries are Σij = ρij σ2 for i̸ = j. Here, ρij denotes the partial correlation between yi and yj . The log-likelihood of the label sequence Y can be expressed as: 
+
+log p(y) = 12
+
+ T log(2 π) + log |Σ| + ( y − ˆy)⊤Σ−1(y − ˆy) .
+
+Removing the constant terms unrelated to ˆy, we obtain the practical negative log-likelihood (PNLL): 
+
+PNLL = ( y − ˆy)⊤Σ−1(y − ˆy).
+
+On the other hand, the TMSE loss can be expressed as: 
+
+TMSE = ∥y − ˆy∥22 = ( y − ˆy)⊤I−1(y − ˆy).
+
+where I is the identity matrix. The difference between TMSE and PNLL can be expressed as: 
+
+Bias = PNLL − TMSE = ( y − ˆy)⊤Σ−1(y − ˆy) − (y − ˆy)⊤I(y − ˆy),
+
+which immediately vanishes if the label sequence is decorrelated, i.e., Σ = I. The proof is completed. 
+
+Lemma B.2 (Lemma 3.3 in the main text) . The projection matrix P∗ can be obtained via singular value decomposition (SVD): Y = UΛ (P∗)⊤, where U ∈ RN×N and P∗ ∈ RK×K consist of singular vectors, and the diagonal of Λ ∈ RN×K consists of singular values. Proof. The proof is available in Section 7.3 in [43]. 
+
+Lemma B.3 (Decorrelated components, Lemma 3.2 in the main text) . Suppose Y ∈ RN×T contains normalized label sequences for N samples, Z = [ z1, ..., zK] are the obtained components; for any 
+
+k̸ = k′, we have z⊤ 
+
+> k
+
+zk′ = 0 .Proof. For any two latent components zk and zk′ with k̸ = k′, we have: 
+
+z⊤ 
+
+> k
+
+zk′ = ( Yp k)⊤(Yp k′ ) = p⊤ 
+
+> k
+
+Y⊤Yp k′ (7) Noting that pk and pk′ are eigenvectors of Y⊤Y [43], we have 
+
+Y⊤Yp k = λkpk, Y⊤Yp k′ = λk′ pk′ , (8) which immediately follows by z⊤ 
+
+> k
+
+zk′ = λk′ p⊤ 
+
+> k
+
+pk′ . Recalling that different projection bases are constrained to orthogonal, i.e., p⊤ 
+
+> k
+
+pk′ = 0 for k̸ = k′, we have 
+
+z⊤ 
+
+> k
+
+zk′ = 0 for all k̸ = k′, (9) which completes the proof.  
+
+> 5The pioneering work [ 51 ] identifies the bias under the first-order Markov assumption on the label sequence. This study generalizes this bias without the first-order Markov assumption.
+
+15 C Generalized Orthogonalization and Decorrelation Methods 
+
+In this section, we introduce alternative transforms for obtaining latent components, each with distinct characteristics such as dimensionality reduction and noise isolation. A comparatively empirical study is provided in Section 4.5. 
+
+RPCA. The robust principal component analysis decomposes the data into a low-rank informative component and a sparse noise component, effectively separating structured signals from noise. Specifically, given Y ∈ RN×T, it is achieved by solving: 
+
+min  
+
+> V,S
+
+∥V∥∗ + λ∥S∥1, subject to Y = V + S, (10) where ∥ · ∥ ∗ is the nuclear norm, ∥ · ∥ 1 is the element-wise ℓ1 norm, and λ is a regularization parameter. Afterwards, it performs the principal component analysis on the obtained informative component 
+
+V to derive the projection matrix P. The latent components are generated by Z = YP . While this approach enhances noise elimination, it does not guarantee decorrelation of the derived components, as the projection matrix P is derived from V instead of the original data matrix Y.
+
+SVD. The singular value decomposition provides a method to decompose the matrix into different components. Given Y ∈ RN×T, we have: 
+
+Y = UΛV ⊤, (11) where U ∈ RN×r and V ∈ RT×R are singular vectors, Λ ∈ Rr×r is diagonal with rank r. The right singular vector is used as the projection matrix, and the latent components are generated by Z = YV .One key distinction here needs to be highlighted. Unlike the workflow in the main text (Algorithm 1), the label sequence is not normalized after window generation before computing SVD here, resulting in non-decorrelated components. 
+
+FA. Factor analysis models the observed data as linear combinations of a small number of latent factors plus noise, capturing the covariance structure through these unobserved factors. Specifically, given mean-centered Y ∈ RN×T, the model assumes: 
+
+Y = VF ⊤ + E, (12) where V ∈ RN×K is the factor loading matrix, K is the number of latent factors ( K ≪ N), F ∈ RT×K
+
+contains the latent factor scores for each sample, and E ∈ RN×T is the noise matrix. The standard assumption is that each factor fi ∼ N (0 , I) and noise ϵi ∼ N (0 , Ψ) , where Ψ is a diagonal covariance matrix. The loadings V and factor scores F are typically estimated via maximum likelihood. The latent components are given by the estimated factor scores, i.e., Z = YΨ−1F(I + F⊤Ψ−1F)−1 := 
+
+YP 6. This approach captures the covariance structure of Y via a small number of factors, but does not necessarily guarantee uncorrelated or noise-isolated components. 
+
+D Complexity Analysis 
+
+In this section, we analyze the running cost of Time-o1. The core computation of Time-o1 involves (a) calculating the projection matrix P∗ via SVD, and (b) performing transformation on both Y and 
+
+ˆY followed by calculating their point-wise MAE loss. Given the target matrix Y ∈ RN×T, the SVD step decomposes Y with an established complexity of O(NT 2) (assuming N ≥ T and K = T ). For the sequence transformation, each sample (row) in Y is multiplied by the projection matrix 
+
+P∗ ∈ RT×T, resulting in a total complexity of O(NT 2). The computation of point-wise MAE loss across all samples and forecast steps is O(NT) , which is negligible compared to the complexity of previous steps. Thus, the overall complexity per batch is dominated by the SVD and projection operations, both scaling as O(NT 2). The main findings from the empirical evaluations are as follows. • Fig. 5 (a) presents the computational cost for calculating the projection matrix. Overall, it increases linearly with the sample size and quadratically with the prediction length, which aligns with the theoretical complexity. Importantly, this operation is performed only once before training begins, rendering the associated overhead acceptable.  
+
+> 6Adapted from source code of sklearn: https://github.com/scikit-learn/scikit-learn/blob/ 98ed9dc73/sklearn/decomposition/
+
+16 • Fig. 5 (b) presents the computational cost for the sequence transformation. The cost increases quadratically with the prediction length, but remains below 2 ms. This cost is comparable to that of a linear projection. Furthermore, sequence transformation is not required during inference. 
+
+In conclusion, Time-o1 does not add complexity to model inference, and the additional complexity during the training stage is negligible. 7377 14754 22131 29508 36886    
+
+> # Samples
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> Time (s) 96 192 336 720
+> Prediction Length T
+> 5
+> 10
+> 15
+> Time (s)
+
+(a) Running cost of SVD. 96 192 336 720     
+
+> Prediction Length T
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 1.25
+> Time (ms)
+> TransDF
+> DF 96 192 336 720
+> Prediction Length T
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> Time (ms)
+> TransDF
+> DF
+
+(b) Running cost of transformation. 
+
+Figure 5: Running cost for projection matrix calculation (left panel with varying number of samples, right panel with varying prediction length) and sequence transformation (left panel for forward pass, right panel for backward pass, with average and shaded areas for 95% confidence intervals). 
+
+E More Experimental Results 
+
+E.1 Long-term forecast performance 
+
+Additional results on long-term forecast performance are available in Table 7. 
+
+E.2 Short-term forecast performance 
+
+Additional results on short-term forecast performance are available in Table 8, where Fredformer [ 37 ]serves as the forecast model. 
+
+E.3 Showcases 
+
+Additional results on showcases are available in Fig. 6 and Fig. 7. 
+
+E.4 Generalization studies 
+
+Additional results on varying forecast models and transformations are available in Fig. 8 and Table 9. 
+
+E.5 Hyperparameter sensitivity 
+
+Additional results on hyperparameter sensitivity are available in Fig. 9 for α and Fig. 10 for γ.
+
+E.6 Comparison with different loss functions 
+
+Additional results on comparing different loss functions are available in Table 10. 
+
+E.7 Varying input length results 
+
+Additional results on varying input lengths are available in Table 11—complementing the fixed length of 96 used in the main text. 
+
+E.8 Random seed sensitivity 
+
+Additional results on varying random seeds are available in Table 12. 17 Table 7: The comprehensive results on the long-term forecasting task. 
+
+Models Time-o1 Fredformer iTransformer FreTS TimesNet MICN TiDE DLinear FEDformer Autoformer Transformer 
+
+(Ours) (2024) (2024) (2023) (2023) (2023) (2023) (2023) (2022) (2021) (2017) 
+
+Metrics MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE 
+
+> ETTm1
+
+96 0.321 0.357 0.326 0.361 0.338 0.372 0.342 0.375 0.368 0.394 0.319 0.366 0.353 0.374 0.346 0.373 0.401 0.434 0.485 0.468 0.503 0.482 
+
+192 0.360 0.378 0.365 0.382 0.382 0.396 0.385 0.400 0.406 0.409 0.364 0.395 0.391 0.393 0.380 0.390 0.415 0.446 0.504 0.482 0.807 0.664 
+
+336 0.389 0.400 0.396 0.404 0.427 0.424 0.416 0.421 0.454 0.444 0.395 0.425 0.423 0.414 0.413 0.414 0.432 0.450 0.520 0.489 0.847 0.678 
+
+720 0.447 0.435 0.459 0.444 0.496 0.463 0.513 0.489 0.527 0.474 0.505 0.499 0.486 0.448 0.472 0.450 0.522 0.500 0.594 0.523 1.037 0.771 
+
+Avg 0.379 0.393 0.387 0.398 0.411 0.414 0.414 0.421 0.438 0.430 0.396 0.421 0.413 0.407 0.403 0.407 0.442 0.457 0.526 0.491 0.799 0.648 
+
+> ETTm2
+
+96 0.172 0.251 0.177 0.260 0.182 0.265 0.188 0.279 0.184 0.262 0.178 0.277 0.182 0.265 0.188 0.283 0.205 0.289 0.218 0.300 0.386 0.441 
+
+192 0.235 0.294 0.242 0.300 0.257 0.315 0.264 0.329 0.257 0.308 0.266 0.343 0.247 0.304 0.280 0.356 0.271 0.334 0.282 0.340 1.410 0.881 
+
+336 0.293 0.333 0.302 0.340 0.320 0.354 0.322 0.369 0.315 0.345 0.299 0.354 0.307 0.343 0.375 0.420 0.327 0.366 0.335 0.370 1.940 1.070 
+
+720 0.388 0.389 0.399 0.397 0.423 0.411 0.489 0.482 0.452 0.421 0.489 0.482 0.408 0.398 0.526 0.508 0.428 0.425 0.423 0.420 2.914 1.276 
+
+Avg 0.272 0.317 0.280 0.324 0.295 0.336 0.316 0.365 0.302 0.334 0.308 0.364 0.286 0.328 0.342 0.392 0.308 0.354 0.315 0.358 1.662 0.917 
+
+> ETTh1
+
+96 0.368 0.391 0.377 0.396 0.385 0.405 0.398 0.409 0.399 0.418 0.381 0.416 0.387 0.395 0.389 0.404 0.391 0.433 0.449 0.465 1.028 0.778 
+
+192 0.424 0.422 0.437 0.425 0.440 0.437 0.451 0.442 0.452 0.451 0.497 0.489 0.439 0.425 0.442 0.440 0.418 0.448 0.459 0.469 1.010 0.789 
+
+336 0.467 0.441 0.486 0.449 0.480 0.457 0.501 0.472 0.488 0.469 0.589 0.555 0.482 0.447 0.488 0.467 0.487 0.484 0.511 0.500 0.908 0.743 
+
+720 0.465 0.463 0.488 0.467 0.504 0.492 0.608 0.571 0.549 0.515 0.665 0.617 0.484 0.471 0.505 0.502 0.494 0.514 0.488 0.498 0.987 0.785 
+
+Avg 0.431 0.429 0.447 0.434 0.452 0.448 0.489 0.474 0.472 0.463 0.533 0.519 0.448 0.435 0.456 0.453 0.447 0.470 0.477 0.483 0.983 0.774 
+
+> ETTh2
+
+96 0.282 0.330 0.293 0.344 0.301 0.349 0.315 0.374 0.321 0.358 0.351 0.398 0.291 0.340 0.330 0.383 0.351 0.391 0.355 0.397 1.485 0.959 
+
+192 0.359 0.381 0.372 0.391 0.383 0.397 0.466 0.467 0.418 0.417 0.492 0.489 0.376 0.392 0.439 0.450 0.456 0.456 0.478 0.471 4.218 1.585 
+
+336 0.394 0.414 0.420 0.433 0.425 0.432 0.522 0.502 0.464 0.454 0.656 0.582 0.417 0.427 0.589 0.538 0.477 0.492 0.459 0.469 2.775 1.361 
+
+720 0.400 0.427 0.421 0.439 0.436 0.448 0.792 0.643 0.434 0.450 0.981 0.718 0.429 0.446 0.757 0.626 0.522 0.505 0.499 0.502 2.274 1.257 
+
+Avg 0.359 0.388 0.377 0.402 0.386 0.407 0.524 0.496 0.409 0.420 0.620 0.546 0.378 0.401 0.529 0.499 0.452 0.461 0.448 0.460 2.688 1.291 
+
+> ECL
+
+96 0.145 0.235 0.161 0.258 0.150 0.242 0.180 0.266 0.170 0.272 0.170 0.281 0.197 0.274 0.197 0.282 0.187 0.302 0.189 0.304 0.253 0.350 
+
+192 0.159 0.249 0.174 0.269 0.168 0.259 0.184 0.272 0.183 0.282 0.185 0.297 0.197 0.277 0.197 0.286 0.207 0.322 0.271 0.371 0.262 0.356 
+
+336 0.173 0.264 0.194 0.290 0.182 0.274 0.199 0.290 0.203 0.302 0.190 0.298 0.212 0.292 0.209 0.301 0.211 0.326 0.243 0.352 0.269 0.363 
+
+720 0.203 0.292 0.235 0.319 0.214 0.304 0.234 0.322 0.294 0.366 0.221 0.329 0.254 0.325 0.245 0.334 0.253 0.361 0.295 0.388 0.277 0.365 
+
+Avg 0.170 0.260 0.191 0.284 0.179 0.270 0.199 0.288 0.212 0.306 0.192 0.302 0.215 0.292 0.212 0.301 0.214 0.328 0.249 0.354 0.265 0.358 
+
+> Traffic
+
+96 0.393 0.265 0.461 0.327 0.397 0.271 0.531 0.323 0.590 0.316 0.498 0.298 0.646 0.386 0.649 0.397 0.588 0.367 0.575 0.356 0.689 0.396 
+
+192 0.410 0.275 0.470 0.326 0.416 0.279 0.519 0.321 0.624 0.336 0.521 0.309 0.599 0.362 0.598 0.371 0.613 0.377 0.647 0.394 0.710 0.388 
+
+336 0.421 0.280 0.492 0.338 0.429 0.286 0.529 0.327 0.641 0.345 0.529 0.314 0.606 0.363 0.605 0.373 0.640 0.398 0.694 0.446 0.687 0.366 
+
+720 0.451 0.298 0.521 0.353 0.462 0.303 0.573 0.346 0.670 0.356 0.567 0.326 0.643 0.383 0.646 0.395 0.718 0.450 0.731 0.468 0.681 0.366 
+
+Avg 0.419 0.280 0.486 0.336 0.426 0.285 0.538 0.330 0.631 0.338 0.529 0.312 0.624 0.373 0.625 0.384 0.640 0.398 0.662 0.416 0.692 0.379 
+
+> Weather
+
+96 0.169 0.219 0.180 0.220 0.171 0.210 0.174 0.228 0.183 0.229 0.179 0.244 0.192 0.232 0.194 0.253 0.235 0.310 0.233 0.306 0.423 0.448 
+
+192 0.210 0.258 0.222 0.258 0.246 0.278 0.213 0.266 0.242 0.276 0.242 0.310 0.240 0.270 0.238 0.296 0.295 0.353 0.286 0.347 0.664 0.585 
+
+336 0.259 0.297 0.283 0.301 0.296 0.313 0.270 0.316 0.293 0.312 0.273 0.330 0.292 0.307 0.282 0.332 0.364 0.397 0.346 0.385 0.848 0.686 
+
+720 0.327 0.349 0.358 0.348 0.362 0.353 0.337 0.362 0.366 0.361 0.360 0.399 0.364 0.353 0.347 0.385 0.411 0.429 0.412 0.420 0.861 0.685 
+
+Avg 0.241 0.280 0.261 0.282 0.269 0.289 0.249 0.293 0.271 0.295 0.264 0.321 0.272 0.291 0.265 0.317 0.326 0.372 0.319 0.365 0.699 0.601 
+
+> PEMS03
+
+12 0.070 0.176 0.081 0.191 0.072 0.179 0.085 0.198 0.094 0.201 0.096 0.217 0.117 0.226 0.105 0.220 0.108 0.229 0.233 0.366 0.106 0.206 
+
+24 0.087 0.198 0.121 0.240 0.104 0.217 0.129 0.244 0.116 0.221 0.095 0.210 0.233 0.322 0.183 0.297 0.131 0.255 0.405 0.485 0.117 0.221 
+
+36 0.105 0.219 0.180 0.292 0.137 0.251 0.173 0.286 0.134 0.237 0.107 0.223 0.379 0.418 0.258 0.361 0.159 0.285 0.327 0.415 0.127 0.233 
+
+48 0.124 0.238 0.201 0.316 0.174 0.285 0.207 0.315 0.161 0.262 0.125 0.242 0.535 0.516 0.319 0.410 0.209 0.331 0.679 0.634 0.139 0.245 
+
+Avg 0.097 0.208 0.146 0.260 0.122 0.233 0.149 0.261 0.126 0.230 0.106 0.223 0.316 0.370 0.216 0.322 0.152 0.275 0.411 0.475 0.122 0.226 
+
+> PEMS08
+
+12 0.081 0.183 0.091 0.199 0.084 0.187 0.096 0.205 0.111 0.208 0.161 0.274 0.121 0.233 0.113 0.225 0.163 0.258 0.232 0.334 0.204 0.232 
+
+24 0.117 0.218 0.138 0.245 0.123 0.227 0.151 0.258 0.139 0.232 0.127 0.237 0.232 0.325 0.199 0.302 0.197 0.288 0.545 0.550 0.232 0.251 
+
+36 0.157 0.253 0.199 0.303 0.170 0.268 0.203 0.303 0.168 0.260 0.148 0.252 0.376 0.427 0.295 0.371 0.241 0.326 0.379 0.436 0.246 0.263 
+
+48 0.207 0.294 0.255 0.338 0.218 0.306 0.247 0.334 0.189 0.272 0.175 0.270 0.543 0.527 0.389 0.429 0.302 0.375 0.531 0.502 0.278 0.297 
+
+Avg 0.141 0.237 0.171 0.271 0.149 0.247 0.174 0.275 0.152 0.243 0.153 0.258 0.318 0.378 0.249 0.332 0.226 0.312 0.422 0.456 0.240 0.261 
+
+1st Count 43 42 0 1 0 1 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 0
+
+Note : We fix the input length as 96 following [ 28 ]. Bold typeface highlights the top performance for each metric, while underlined text denotes the second-best results. Avg indicates the results averaged over forecasting lengths: T=96, 192, 336 and 720. 
+
+18 Table 8: The comprehensive results on the short-term forecasting task. 
+
+Models Time-o1 Fredformer iTransformer FreTS MICN DLinear Fedformer 
+
+(Ours) (2024) (2024) (2023) (2023) (2023) (2023) 
+
+Metric SMAPE MASE OWA SMAPE MASE OWA SMAPE MASE OWA SMAPE MASE OWA SMAPE MASE OWA SMAPE MASE OWA SMAPE MASE OWA 
+
+Yearly 13.485 3.010 0.791 13.509 3.028 0.794 13.797 3.143 0.818 13.576 3.068 0.801 14.594 3.392 0.873 14.307 3.094 0.827 13.648 3.089 0.806 
+
+Quarterly 10.105 1.180 0.889 10.140 1.185 0.893 10.503 1.248 0.932 10.361 1.223 0.916 11.417 1.385 1.023 10.500 1.237 0.928 10.612 1.246 0.936 
+
+Monthly 12.649 0.930 0.875 12.696 0.931 0.878 13.227 1.013 0.935 13.088 0.990 0.919 13.834 1.080 0.987 13.362 1.007 0.937 14.181 1.105 1.011 
+
+Others 4.852 3.274 1.027 4.848 3.230 1.019 5.101 3.419 1.076 5.563 3.71 1.17 6.137 4.201 1.308 5.12 3.649 1.114 4.823 3.243 1.019 
+
+Average 11.841 1.585 0.851 11.879 1.590 0.854 12.298 1.68 0.893 12.169 1.66 0.883 13.044 1.841 0.962 12.48 1.674 0.898 12.734 1.702 0.914 
+
+1st Count 4 4 4 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0
+
+Note : Bold typeface highlights the top performance for each metric, while underlined text denotes the second-best results. Avg indicates the results averaged over forecasting lengths: yearly, quarterly, and monthly. 0 100 200 300 400 
+
+−1.5 
+
+−1.0 
+
+−0.5 
+
+0.0 
+
+GroundTruth 
+
+Prediction 0 100 200 300 400 
+
+−1.5 
+
+−1.0 
+
+−0.5 
+
+0.0 
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−20 
+
+−15 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−20 
+
+−15 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 
+
+(a) Fredformer with ETTm2 case 1 0 100 200 300 400 
+
+−1.5 
+
+−1.0 
+
+−0.5 
+
+0.0 
+
+GroundTruth 
+
+Prediction 0 100 200 300 400 
+
+−1.5 
+
+−1.0 
+
+−0.5 
+
+0.0 
+
+GroundTruth 
+
+Prediction 0 10 20 30 
+
+−20 
+
+−15 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 0 10 20 30 
+
+−20 
+
+−15 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 
+
+(b) iTransformer with ETTm2 case 1 0 100 200 300 400 
+
+−0.8 
+
+−0.4 
+
+0.0 
+
+0.4 
+
+0.8 
+
+GroundTruth 
+
+Prediction 0 100 200 300 400 
+
+−0.8 
+
+−0.4 
+
+0.0 
+
+0.4 
+
+0.8 
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 
+
+(c) Fredformer with ETTm2 case 2 0 100 200 300 400 
+
+−0.8 
+
+−0.4 
+
+0.0 
+
+0.4 
+
+0.8 
+
+GroundTruth 
+
+Prediction 0 100 200 300 400 
+
+−0.8 
+
+−0.4 
+
+0.0 
+
+0.4 
+
+0.8 
+
+GroundTruth 
+
+Prediction 0 10 20 30 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 0 10 20 30 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 
+
+(d) iTransformer with ETTm2 case 2 
+
+Figure 6: The forecast sequences generated with DF and Time-o1. The forecast length is set to 336 and the experiment is conducted on ETTm2. 19 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 GroundTruth 
+
+Prediction 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction (a) Fredformer with ECL case 1 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 GroundTruth 
+
+Prediction 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−10 
+
+−5 
+
+0
+
+5
+
+GroundTruth 
+
+Prediction 
+
+(b) iTransformer with ECL case 1 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 
+
+GroundTruth 
+
+Prediction 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−12 
+
+−6 
+
+0
+
+6
+
+12 
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−12 
+
+−6 
+
+0
+
+6
+
+12 
+
+GroundTruth 
+
+Prediction 
+
+(c) Fredformer with ECL case 2 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 
+
+GroundTruth 
+
+Prediction 0 100 200 300 
+
+−1.2 
+
+0.0 
+
+1.2 
+
+2.4 
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−12 
+
+−6 
+
+0
+
+6
+
+12 
+
+GroundTruth 
+
+Prediction 0 10 20 30 40 
+
+−12 
+
+−6 
+
+0
+
+6
+
+12 
+
+GroundTruth 
+
+Prediction 
+
+(d) iTransformer with ECL case 2 
+
+Figure 7: The forecast sequences generated with DF and Time-o1. The forecast length is set to 192 and the experiment is conducted on ECL. Fred. iTrans. FreTS DLine. 
+
+0.38 
+
+0.40 
+
+0.42 
+
+0.44 
+
+> MAE
+
+with Time-o1 
+
+w/o Time-o1 Fred. iTrans. FreTS DLine. 
+
+0.28 
+
+0.32 
+
+0.36 
+
+0.40 
+
+0.44 
+
+> MAE
+
+with Time-o1 
+
+w/o Time-o1 Fred. iTrans. FreTS DLine. 
+
+0.42 
+
+0.45 
+
+0.48 
+
+0.51 
+
+> MAE
+
+with Time-o1 
+
+w/o Time-o1 Fred. iTrans. FreTS DLine. 
+
+0.35 
+
+0.40 
+
+0.45 
+
+0.50 
+
+0.55 
+
+> MAE
+
+with Time-o1 
+
+w/o Time-o1 Fred. iTrans. FreTS DLine. 
+
+0.36 
+
+0.38 
+
+0.40 
+
+0.42 
+
+0.44 
+
+0.46 
+
+> MSE
+
+with Time-o1 
+
+w/o Time-o1 
+
+(a) ETTm1 Fred. iTrans. FreTS DLine. 
+
+0.24 
+
+0.28 
+
+0.32 
+
+0.36 
+
+0.40 
+
+> MSE
+
+with Time-o1 
+
+w/o Time-o1 (b) ETTm2 Fred. iTrans. FreTS DLine. 
+
+0.42 
+
+0.45 
+
+0.48 
+
+0.51 
+
+0.54 
+
+> MSE
+
+with Time-o1 
+
+w/o Time-o1 (c) ETTh1 Fred. iTrans. FreTS DLine. 
+
+0.30 
+
+0.35 
+
+0.40 
+
+0.45 
+
+0.50 
+
+0.55 
+
+0.60 
+
+> MSE
+
+with Time-o1 
+
+w/o Time-o1 (d) ETTh2 
+
+Figure 8: Performance of different forecast models with and without Time-o1. The forecast errors are averaged over forecast lengths and the error bars represent 50% confidence intervals. 20 Table 9: Varying transformation results. 
+
+Trans PCA RPCA SVD FA DF 
+
+Metrics MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE 
+
+> ECL
+
+96 0.1449 0.2348 0.1450 0.2349 0.1450 0.2350 0.1478 0.2385 0.1500 0.2415 
+
+192 0.1592 0.2487 0.1594 0.2487 0.1595 0.2490 0.1619 0.2517 0.1681 0.2591 
+
+336 0.1731 0.2645 0.1732 0.2646 0.1730 0.2643 0.1789 0.2711 0.1823 0.2744 
+
+720 0.2033 0.2920 0.2066 0.2960 0.2214 0.3066 0.2095 0.2975 0.2145 0.3035 
+
+Avg 0.1701 0.2600 0.1710 0.2611 0.1747 0.2637 0.1745 0.2647 0.1787 0.2696 
+
+> Weather
+
+96 0.1692 0.2185 0.1715 0.2199 0.1723 0.2223 0.1717 0.2247 0.1737 0.2277 
+
+192 0.2102 0.2575 0.2116 0.2590 0.2116 0.2597 0.2125 0.2636 0.2128 0.2661 
+
+336 0.2586 0.2971 0.2631 0.3072 0.2676 0.3110 0.2613 0.2997 0.2705 0.3159 
+
+720 0.3271 0.3487 0.3303 0.3581 0.3394 0.3681 0.3354 0.3610 0.3372 0.3623 
+
+Avg 0.2413 0.2805 0.2441 0.2860 0.2477 0.2903 0.2452 0.2872 0.2486 0.2930 0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.322
+> 0.324
+> 0.326
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.360
+> 0.365
+> 0.370
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.390
+> 0.393
+> 0.396
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.450
+> 0.455
+> 0.460
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.378
+> 0.385
+> 0.392
+> MSE
+
+(a) 0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.172
+> 0.174
+> 0.176
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.236
+> 0.238
+> 0.240
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.294
+> 0.297
+> 0.300
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.390
+> 0.393
+> 0.396
+> 0.399
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.264
+> 0.270
+> 0.276
+> 0.282
+> 0.288
+> MSE
+
+(b) 0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.370
+> 0.375
+> 0.380
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.425
+> 0.430
+> 0.435
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.470
+> 0.475
+> 0.480
+> 0.485
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.468
+> 0.480
+> 0.492
+> 0.504
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.429
+> 0.440
+> 0.451
+> MSE
+
+(c) 0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.284
+> 0.288
+> 0.292
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.360
+> 0.369
+> 0.378
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.396
+> 0.407
+> 0.418
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.400
+> 0.408
+> 0.416
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.360
+> 0.369
+> 0.378
+> MSE
+
+(d) 0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.146
+> 0.148
+> 0.150
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.160
+> 0.164
+> 0.168
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.174
+> 0.177
+> 0.180
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.208
+> 0.216
+> 0.224
+> 0.232
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.170
+> 0.175
+> 0.180
+> MSE
+
+(e) 0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.176
+> 0.198
+> 0.220
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.216
+> 0.234
+> 0.252
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.260
+> 0.264
+> 0.268
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.330
+> 0.336
+> 0.342
+> MSE
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+α
+
+> 0.234
+> 0.252
+> 0.270
+> MSE
+
+(f) 
+
+Figure 9: Time-o1 improves Fredformer performance given a wide range of transformed loss strength 
+
+α. These experiments are conducted on ETTh1 (a), ETTh2 (b), ETTm1 (c), ETTm2 (d), ECL (e), Weather (f) datasets. Different columns correspond to different forecast lengths (from left to right: 96, 192, 336, 720, and their average with shaded areas being 15% confidence intervals). 21 0.1 0.4 0.7 1.0 
+
+γ
+
+0.322 
+
+0.323 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.360 
+
+0.363 
+
+0.366 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.390 
+
+0.393 
+
+0.396 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.451 
+
+0.462 
+
+0.473 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.374 
+
+0.385 
+
+0.396 
+
+> MSE
+
+(a) 0.1 0.4 0.7 1.0 
+
+γ
+
+0.171 
+
+0.180 
+
+0.189 
+
+0.198 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.235 
+
+0.240 
+
+0.245 
+
+0.250 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.296 
+
+0.304 
+
+0.312 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.390 
+
+0.393 
+
+0.396 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.264 
+
+0.276 
+
+0.288 
+
+> MSE
+
+(b) 0.1 0.4 0.7 1.0 
+
+γ
+
+0.378 
+
+0.420 
+
+0.462 
+
+0.504 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.440 
+
+0.462 
+
+0.484 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.465 
+
+0.480 
+
+0.495 
+
+0.510 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.468 
+
+0.477 
+
+0.486 
+
+0.495 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.425 
+
+0.450 
+
+0.475 
+
+0.500 
+
+> MSE
+
+(c) 0.1 0.4 0.7 1.0 
+
+γ
+
+0.285 
+
+0.300 
+
+0.315 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.360 
+
+0.368 
+
+0.376 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.396 
+
+0.402 
+
+0.408 
+
+0.414 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.400 
+
+0.408 
+
+0.416 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.360 
+
+0.368 
+
+0.376 
+
+0.384 
+
+> MSE
+
+(d) 0.1 0.4 0.7 1.0 
+
+γ
+
+0.146 
+
+0.148 
+
+0.150 
+
+0.152 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.160 
+
+0.162 
+
+0.164 
+
+0.166 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.174 
+
+0.176 
+
+0.178 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.204 
+
+0.205 
+
+0.206 
+
+0.207 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.168 
+
+0.171 
+
+0.174 
+
+0.177 
+
+> MSE
+
+(e) 0.1 0.4 0.7 1.0 
+
+γ
+
+0.170 
+
+0.172 
+
+0.174 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.210 
+
+0.211 
+
+0.212 
+
+0.213 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.264 
+
+0.272 
+
+0.280 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.327 
+
+0.330 
+
+0.333 
+
+0.336 
+
+> MSE
+
+0.1 0.4 0.7 1.0 
+
+γ
+
+0.240 
+
+0.246 
+
+0.252 
+
+0.258 
+
+> MSE
+
+(f) 
+
+Figure 10: Time-o1 improves Fredformer performance given a wide range of rank ratio γ. These experiments are conducted on ETTh1 (a), ETTh2 (b), ETTm1 (c), ETTm2 (d), ECL (e), and Weather (f) datasets. Different columns correspond to different forecast lengths (from left to right: 96, 192, 336, 720, and their average with shaded areas being 15% confidence intervals). 22 Table 10: Comparable results with different loss functions. 
+
+Loss Time-o1 FreDF Koopman Dilate Soft-DTW DPTA DF Metrics MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE 
+
+Forecast model: FredFormer 
+
+> ETTm1
+
+96 0.321 0.357 0.326 0.355 0.335 0.368 0.337 0.367 0.332 0.363 0.332 0.364 0.326 0.361 192 0.360 0.378 0.363 0.380 0.366 0.384 0.364 0.384 0.370 0.386 0.370 0.386 0.365 0.382 336 0.389 0.400 0.392 0.400 0.399 0.408 0.397 0.406 0.406 0.409 0.409 0.410 0.396 0.404 720 0.447 0.435 0.455 0.440 0.456 0.441 0.457 0.443 0.478 0.450 0.476 0.448 0.459 0.444 Avg 0.379 0.393 0.384 0.394 0.389 0.400 0.389 0.400 0.397 0.402 0.396 0.402 0.387 0.398 ETTh1  96 0.368 0.391 0.370 0.392 0.375 0.397 0.378 0.399 0.376 0.398 0.378 0.399 0.377 0.396 192 0.424 0.422 0.436 0.437 0.438 0.434 0.439 0.435 0.439 0.435 0.438 0.433 0.437 0.425 336 0.467 0.441 0.473 0.443 0.473 0.455 0.481 0.453 0.484 0.455 0.486 0.455 0.486 0.449 720 0.465 0.463 0.474 0.466 0.523 0.487 0.516 0.482 0.542 0.510 0.538 0.510 0.488 0.467 Avg 0.431 0.429 0.438 0.434 0.452 0.443 0.453 0.442 0.460 0.449 0.460 0.449 0.447 0.434 ECL  96 0.151 0.245 0.152 0.247 0.166 0.263 0.158 0.253 0.168 0.266 0.158 0.253 0.161 0.258 192 0.166 0.256 0.166 0.257 0.174 0.267 0.170 0.263 0.218 0.313 0.216 0.307 0.174 0.269 336 0.181 0.274 0.183 0.278 0.188 0.280 0.190 0.286 0.197 0.291 0.199 0.295 0.194 0.290 720 0.213 0.304 0.216 0.304 0.232 0.318 0.229 0.316 0.240 0.322 0.235 0.322 0.235 0.319 Avg 0.178 0.270 0.179 0.272 0.190 0.282 0.187 0.280 0.206 0.298 0.202 0.294 0.191 0.284 Weather  96 0.171 0.208 0.174 0.213 0.174 0.214 0.173 0.214 0.173 0.213 0.179 0.219 0.180 0.220 192 0.219 0.253 0.219 0.254 0.220 0.256 0.225 0.260 0.220 0.255 0.223 0.257 0.222 0.258 336 0.277 0.295 0.278 0.296 0.280 0.298 0.280 0.299 0.281 0.296 0.281 0.298 0.283 0.301 720 0.353 0.346 0.354 0.347 0.354 0.347 0.355 0.348 0.369 0.355 0.356 0.347 0.358 0.348 Avg 0.255 0.276 0.256 0.277 0.257 0.279 0.258 0.280 0.261 0.280 0.260 0.280 0.261 0.282 
+
+Forecast model: iTransformer 
+
+> ETTm1
+
+96 0.323 0.358 0.334 0.365 0.350 0.382 0.342 0.376 0.339 0.373 0.341 0.375 0.338 0.372 192 0.371 0.388 0.381 0.390 0.389 0.400 0.381 0.396 0.383 0.395 0.383 0.395 0.382 0.396 336 0.408 0.407 0.417 0.412 0.425 0.423 0.418 0.418 0.429 0.423 0.429 0.423 0.427 0.424 720 0.477 0.450 0.489 0.453 0.489 0.458 0.487 0.457 0.516 0.469 0.512 0.467 0.496 0.463 Avg 0.395 0.401 0.405 0.405 0.413 0.416 0.407 0.412 0.417 0.415 0.416 0.415 0.411 0.414 ETTh1  96 0.378 0.393 0.378 0.395 0.392 0.411 0.385 0.405 0.387 0.405 0.386 0.405 0.385 0.405 192 0.428 0.423 0.428 0.423 0.446 0.442 0.440 0.437 0.443 0.439 0.441 0.439 0.440 0.437 336 0.473 0.450 0.470 0.447 0.483 0.461 0.480 0.457 0.494 0.464 0.489 0.462 0.480 0.457 720 0.473 0.469 0.490 0.484 0.501 0.491 0.504 0.492 0.557 0.520 0.538 0.509 0.504 0.492 Avg 0.438 0.434 0.442 0.437 0.455 0.451 0.452 0.448 0.470 0.457 0.463 0.454 0.452 0.448 ECL  96 0.145 0.235 0.149 0.238 0.151 0.243 0.150 0.241 0.149 0.241 0.149 0.240 0.150 0.242 192 0.159 0.249 0.163 0.251 0.167 0.257 0.168 0.259 0.164 0.255 0.166 0.257 0.168 0.259 336 0.173 0.264 0.179 0.268 0.182 0.275 0.181 0.274 0.180 0.274 0.180 0.272 0.182 0.274 720 0.203 0.292 0.212 0.297 0.212 0.300 0.212 0.300 0.207 0.296 0.212 0.300 0.214 0.304 Avg 0.170 0.260 0.176 0.264 0.178 0.269 0.178 0.269 0.175 0.266 0.177 0.267 0.179 0.270 Weather  96 0.163 0.202 0.170 0.208 0.206 0.257 0.208 0.259 0.207 0.252 0.209 0.258 0.171 0.210 192 0.214 0.248 0.219 0.252 0.264 0.300 0.252 0.285 0.264 0.303 0.258 0.291 0.246 0.278 336 0.274 0.294 0.279 0.296 0.309 0.326 0.311 0.328 0.314 0.333 0.312 0.331 0.296 0.313 720 0.351 0.344 0.358 0.347 0.377 0.369 0.374 0.364 0.384 0.377 0.383 0.373 0.362 0.353 Avg 0.251 0.272 0.257 0.276 0.289 0.313 0.286 0.309 0.292 0.316 0.291 0.313 0.269 0.289 
+
+23 Table 11: Varying input sequence length results on the Weather dataset. 
+
+Models Time-o1 iTransformer Time-o1 PatchTST Metrics MSE MAE MSE MAE MSE MAE MSE MAE Input sequence length 96 96 0.163 0.202 0.171 0.210 0.175 0.213 0.200 0.244 192 0.214 0.248 0.246 0.278 0.224 0.257 0.229 0.263 336 0.274 0.294 0.296 0.313 0.276 0.296 0.287 0.303 720 0.351 0.344 0.362 0.353 0.353 0.346 0.363 0.353 Avg 0.250 0.272 0.269 0.289 0.257 0.278 0.270 0.291 192 96 0.163 0.205 0.168 0.215 0.158 0.199 0.164 0.208 192 0.210 0.248 0.213 0.253 0.204 0.242 0.225 0.269 336 0.259 0.287 0.265 0.294 0.257 0.286 0.287 0.308 720 0.334 0.338 0.341 0.345 0.332 0.337 0.341 0.345 Avg 0.241 0.270 0.247 0.277 0.238 0.266 0.254 0.283 336 96 0.157 0.203 0.162 0.213 0.150 0.196 0.156 0.206 192 0.199 0.246 0.211 0.256 0.196 0.241 0.222 0.277 336 0.251 0.287 0.260 0.295 0.246 0.282 0.251 0.285 720 0.324 0.338 0.332 0.341 0.320 0.333 0.327 0.338 Avg 0.233 0.268 0.241 0.276 0.228 0.263 0.239 0.277 720 96 0.161 0.213 0.172 0.225 0.152 0.201 0.154 0.207 192 0.205 0.250 0.220 0.268 0.198 0.248 0.205 0.254 336 0.254 0.292 0.282 0.311 0.248 0.284 0.248 0.288 720 0.318 0.339 0.337 0.351 0.313 0.335 0.317 0.339 Avg 0.235 0.274 0.253 0.289 0.228 0.267 0.231 0.272 
+
+Table 12: Experimental results ( mean ±std ) with varying seeds (2021-2025). 
+
+Dataset ECL Weather Models Time-o1 DF Time-o1 DF Metrics MSE MAE MSE MAE MSE MAE MSE MAE 96 0.145 ±0.000 0.235 ±0.000 0.150 ±0.001 0.242 ±0.001 0.164 ±0.001 0.203 ±0.001 0.190 ±0.012 0.232 ±0.014 
+
+192 0.160 ±0.001 0.249 ±0.001 0.166 ±0.002 0.257 ±0.002 0.216 ±0.002 0.250 ±0.001 0.240 ±0.011 0.272 ±0.010 
+
+336 0.174 ±0.002 0.266 ±0.002 0.181 ±0.001 0.273 ±0.001 0.274 ±0.001 0.294 ±0.001 0.293 ±0.003 0.310 ±0.003 
+
+720 0.205 ±0.001 0.293 ±0.001 0.216 ±0.004 0.303 ±0.003 0.353 ±0.002 0.344 ±0.001 0.361 ±0.002 0.352 ±0.001 
+
+Avg 0.171 ±0.001 0.261 ±0.001 0.178 ±0.001 0.269 ±0.001 0.252 ±0.001 0.273 ±0.001 0.271 ±0.003 0.292 ±0.003 
+
+24 NeurIPS Paper Checklist 
+
+1. Claims 
+
+Question: Do the main claims made in the abstract and introduction accurately reflect the paper’s contributions and scope? Answer: [Yes] Justification: The main claims made in the abstract and introduction accurately reflect our paper’s contributions and scope. Guidelines: • The answer NA means that the abstract and introduction do not include the claims made in the paper. • The abstract and/or introduction should clearly state the claims made, including the contributions made in the paper and important assumptions and limitations. A No or NA answer to this question will not be perceived well by the reviewers. • The claims made should match theoretical and experimental results, and reflect how much the results can be expected to generalize to other settings. • It is fine to include aspirational goals as motivation as long as it is clear that these goals are not attained by the paper. 2. Limitations 
+
+Question: Does the paper discuss the limitations of the work performed by the authors? Answer: [Yes] Justification: Our limitations are discussed in conclusions. Guidelines: • The answer NA means that the paper has no limitation while the answer No means that the paper has limitations, but those are not discussed in the paper. • The authors are encouraged to create a separate ”Limitations” section in their paper. • The paper should point out any strong assumptions and how robust the results are to violations of these assumptions (e.g., independence assumptions, noiseless settings, model well-specification, asymptotic approximations only holding locally). The authors should reflect on how these assumptions might be violated in practice and what the implications would be. • The authors should reflect on the scope of the claims made, e.g., if the approach was only tested on a few datasets or with a few runs. In general, empirical results often depend on implicit assumptions, which should be articulated. • The authors should reflect on the factors that influence the performance of the approach. For example, a facial recognition algorithm may perform poorly when image resolution is low or images are taken in low lighting. Or a speech-to-text system might not be used reliably to provide closed captions for online lectures because it fails to handle technical jargon. • The authors should discuss the computational efficiency of the proposed algorithms and how they scale with dataset size. • If applicable, the authors should discuss possible limitations of their approach to address problems of privacy and fairness. • While the authors might fear that complete honesty about limitations might be used by reviewers as grounds for rejection, a worse outcome might be that reviewers discover limitations that aren’t acknowledged in the paper. The authors should use their best judgment and recognize that individual actions in favor of transparency play an impor-tant role in developing norms that preserve the integrity of the community. Reviewers will be specifically instructed to not penalize honesty concerning limitations. 3. Theory assumptions and proofs 
+
+Question: For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof? Answer: [Yes] 25 Justification: All proofs of theoretical results are involved in Appendix. Guidelines: • The answer NA means that the paper does not include theoretical results. • All the theorems, formulas, and proofs in the paper should be numbered and cross-referenced. • All assumptions should be clearly stated or referenced in the statement of any theorems. • The proofs can either appear in the main paper or the supplemental material, but if they appear in the supplemental material, the authors are encouraged to provide a short proof sketch to provide intuition. • Inversely, any informal proof provided in the core of the paper should be complemented by formal proofs provided in appendix or supplemental material. • Theorems and Lemmas that the proof relies upon should be properly referenced. 4. Experimental result reproducibility 
+
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-perimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)? Answer: [Yes] Justification: We detail our training and evaluation protocols in the experimental setting section. Guidelines: • The answer NA means that the paper does not include experiments. • If the paper includes experiments, a No answer to this question will not be perceived well by the reviewers: Making the paper reproducible is important, regardless of whether the code and data are provided or not. • If the contribution is a dataset and/or model, the authors should describe the steps taken to make their results reproducible or verifiable. • Depending on the contribution, reproducibility can be accomplished in various ways. For example, if the contribution is a novel architecture, describing the architecture fully might suffice, or if the contribution is a specific model and empirical evaluation, it may be necessary to either make it possible for others to replicate the model with the same dataset, or provide access to the model. In general. releasing code and data is often one good way to accomplish this, but reproducibility can also be provided via detailed instructions for how to replicate the results, access to a hosted model (e.g., in the case of a large language model), releasing of a model checkpoint, or other means that are appropriate to the research performed. • While NeurIPS does not require releasing code, the conference does require all submis-sions to provide some reasonable avenue for reproducibility, which may depend on the nature of the contribution. For example (a) If the contribution is primarily a new algorithm, the paper should make it clear how to reproduce that algorithm. (b) If the contribution is primarily a new model architecture, the paper should describe the architecture clearly and fully. (c) If the contribution is a new model (e.g., a large language model), then there should either be a way to access this model for reproducing the results or a way to reproduce the model (e.g., with an open-source dataset or instructions for how to construct the dataset). (d) We recognize that reproducibility may be tricky in some cases, in which case authors are welcome to describe the particular way they provide for reproducibility. In the case of closed-source models, it may be that access to the model is limited in some way (e.g., to registered users), but it should be possible for other researchers to have some path to reproducing or verifying the results. 5. Open access to data and code 
+
+Question: Does the paper provide open access to the data and code, with sufficient instruc-tions to faithfully reproduce the main experimental results, as described in supplemental material? 26 Answer: [Yes] Justification: We use open access data, and the code is provided in an anonymous link. Guidelines: • The answer NA means that paper does not include experiments requiring code. • Please see the NeurIPS code and data submission guidelines ( https://nips.cc/ public/guides/CodeSubmissionPolicy ) for more details. • While we encourage the release of code and data, we understand that this might not be possible, so “No” is an acceptable answer. Papers cannot be rejected simply for not including code, unless this is central to the contribution (e.g., for a new open-source benchmark). • The instructions should contain the exact command and environment needed to run to reproduce the results. See the NeurIPS code and data submission guidelines ( https: //nips.cc/public/guides/CodeSubmissionPolicy ) for more details. • The authors should provide instructions on data access and preparation, including how to access the raw data, preprocessed data, intermediate data, and generated data, etc. • The authors should provide scripts to reproduce all experimental results for the new proposed method and baselines. If only a subset of experiments are reproducible, they should state which ones are omitted from the script and why. • At submission time, to preserve anonymity, the authors should release anonymized versions (if applicable). • Providing as much information as possible in supplemental material (appended to the paper) is recommended, but including URLs to data and code is permitted. 6. Experimental setting/details 
+
+Question: Does the paper specify all the training and test details (e.g., data splits, hyper-parameters, how they were chosen, type of optimizer, etc.) necessary to understand the results? Answer: [Yes] Justification: We detail our training and evaluation protocols in the experimental setting section. Guidelines: • The answer NA means that the paper does not include experiments. • The experimental setting should be presented in the core of the paper to a level of detail that is necessary to appreciate the results and make sense of them. • The full details can be provided either with the code, in appendix, or as supplemental material. 7. Experiment statistical significance 
+
+Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments? Answer: [Yes] Justification: In Figure 3 which are crucial for evaluating the efficacy of TransDF, we report the error bars to make the results more rigorous and comprehensive. Guidelines: • The answer NA means that the paper does not include experiments. • The authors should answer ”Yes” if the results are accompanied by error bars, confi-dence intervals, or statistical significance tests, at least for the experiments that support the main claims of the paper. • The factors of variability that the error bars are capturing should be clearly stated (for example, train/test split, initialization, random drawing of some parameter, or overall run with given experimental conditions). • The method for calculating the error bars should be explained (closed form formula, call to a library function, bootstrap, etc.) • The assumptions made should be given (e.g., Normally distributed errors). 27 • It should be clear whether the error bar is the standard deviation or the standard error of the mean. • It is OK to report 1-sigma error bars, but one should state it. The authors should preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis of Normality of errors is not verified. • For asymmetric distributions, the authors should be careful not to show in tables or figures symmetric error bars that would yield results that are out of range (e.g. negative error rates). • If error bars are reported in tables or plots, The authors should explain in the text how they were calculated and reference the corresponding figures or tables in the text. 8. Experiments compute resources 
+
+Question: For each experiment, does the paper provide sufficient information on the com-puter resources (type of compute workers, memory, time of execution) needed to reproduce the experiments? Answer: [Yes] Justification: We report the type of compute workers, memory in Appendix. Guidelines: • The answer NA means that the paper does not include experiments. • The paper should indicate the type of compute workers CPU or GPU, internal cluster, or cloud provider, including relevant memory and storage. • The paper should provide the amount of compute required for each of the individual experimental runs as well as estimate the total compute. • The paper should disclose whether the full research project required more compute than the experiments reported in the paper (e.g., preliminary or failed experiments that didn’t make it into the paper). 9. Code of ethics 
+
+Question: Does the research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?Answer: [Yes] Justification: The research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics. Guidelines: • The answer NA means that the authors have not reviewed the NeurIPS Code of Ethics. • If the authors answer No, they should explain the special circumstances that require a deviation from the Code of Ethics. • The authors should make sure to preserve anonymity (e.g., if there is a special consid-eration due to laws or regulations in their jurisdiction). 10. Broader impacts 
+
+Question: Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed? Answer: [NA] Justification: Since it is an algorithm-oriented research, there is no societal impact of the work performed. Guidelines: • The answer NA means that there is no societal impact of the work performed. • If the authors answer NA or No, they should explain why their work has no societal impact or why the paper does not address societal impact. • Examples of negative societal impacts include potential malicious or unintended uses (e.g., disinformation, generating fake profiles, surveillance), fairness considerations (e.g., deployment of technologies that could make decisions that unfairly impact specific groups), privacy considerations, and security considerations. 28 • The conference expects that many papers will be foundational research and not tied to particular applications, let alone deployments. However, if there is a direct path to any negative applications, the authors should point it out. For example, it is legitimate to point out that an improvement in the quality of generative models could be used to generate deepfakes for disinformation. On the other hand, it is not needed to point out that a generic algorithm for optimizing neural networks could enable people to train models that generate Deepfakes faster. • The authors should consider possible harms that could arise when the technology is being used as intended and functioning correctly, harms that could arise when the technology is being used as intended but gives incorrect results, and harms following from (intentional or unintentional) misuse of the technology. • If there are negative societal impacts, the authors could also discuss possible mitigation strategies (e.g., gated release of models, providing defenses in addition to attacks, mechanisms for monitoring misuse, mechanisms to monitor how a system learns from feedback over time, improving the efficiency and accessibility of ML). 11. Safeguards 
+
+Question: Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse (e.g., pretrained language models, image generators, or scraped datasets)? Answer: [NA] Justification: This paper does not involve these issues. Guidelines: • The answer NA means that the paper poses no such risks. • Released models that have a high risk for misuse or dual-use should be released with necessary safeguards to allow for controlled use of the model, for example by requiring that users adhere to usage guidelines or restrictions to access the model or implementing safety filters. • Datasets that have been scraped from the Internet could pose safety risks. The authors should describe how they avoided releasing unsafe images. • We recognize that providing effective safeguards is challenging, and many papers do not require this, but we encourage authors to take this into account and make a best faith effort. 12. Licenses for existing assets 
+
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected? Answer: [Yes] Justification: The creators or original owners of assets (e.g., code, data, models), used in the paper, are properly credited. The license and terms of use are explicitly mentioned and properly respected. Guidelines: • The answer NA means that the paper does not use existing assets. • The authors should cite the original paper that produced the code package or dataset. • The authors should state which version of the asset is used and, if possible, include a URL. • The name of the license (e.g., CC-BY 4.0) should be included for each asset. • For scraped data from a particular source (e.g., website), the copyright and terms of service of that source should be provided. • If assets are released, the license, copyright information, and terms of use in the package should be provided. For popular datasets, paperswithcode.com/datasets 
+
+has curated licenses for some datasets. Their licensing guide can help determine the license of a dataset. 29 • For existing datasets that are re-packaged, both the original license and the license of the derived asset (if it has changed) should be provided. • If this information is not available online, the authors are encouraged to reach out to the asset’s creators. 13. New assets 
+
+Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets? Answer: [NA] Justification: We do not introduce new datasets and benchmarks in the paper. Guidelines: • The answer NA means that the paper does not release new assets. • Researchers should communicate the details of the dataset/code/model as part of their submissions via structured templates. This includes details about training, license, limitations, etc. • The paper should discuss whether and how consent was obtained from people whose asset is used. • At submission time, remember to anonymize your assets (if applicable). You can either create an anonymized URL or include an anonymized zip file. 14. Crowdsourcing and research with human subjects 
+
+Question: For crowdsourcing experiments and research with human subjects, does the paper include the full text of instructions given to participants and screenshots, if applicable, as well as details about compensation (if any)? Answer: [NA] Justification: We use open-access datasets and do not involve human subjects. Guidelines: • The answer NA means that the paper does not involve crowdsourcing nor research with human subjects. • Including this information in the supplemental material is fine, but if the main contribu-tion of the paper involves human subjects, then as much detail as possible should be included in the main paper. • According to the NeurIPS Code of Ethics, workers involved in data collection, curation, or other labor should be paid at least the minimum wage in the country of the data collector. 15. Institutional review board (IRB) approvals or equivalent for research with human subjects 
+
+Question: Does the paper describe potential risks incurred by study participants, whether such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) approvals (or an equivalent approval/review based on the requirements of your country or institution) were obtained? Answer: [NA] Justification: We use open-access datasets and do not involve human subjects. Guidelines: • The answer NA means that the paper does not involve crowdsourcing nor research with human subjects. • Depending on the country in which research is conducted, IRB approval (or equivalent) may be required for any human subjects research. If you obtained IRB approval, you should clearly state this in the paper. • We recognize that the procedures for this may vary significantly between institutions and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the guidelines for their institution. • For initial submissions, do not include any information that would break anonymity (if applicable), such as the institution conducting the review. 30 16. Declaration of LLM usage 
+
+Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does not impact the core methodology, scientific rigorousness, or originality of the research, declaration is not required. Answer: [NA] Justification: We do not involve LLMs as any important, original, or non-standard compo-nents in this work. Guidelines: • The answer NA means that the core method development in this research does not involve LLMs as any important, original, or non-standard components. • Please refer to our LLM policy ( https://neurips.cc/Conferences/2025/LLM )for what should or should not be described. 31

@@ -1,0 +1,2196 @@
+Title: 3660_Neural_Stochastic_Flows_S.pdf
+
+URL Source: https://openreview.net/pdf?id=PrYDDxphym
+
+Number of Pages: 46
+
+Markdown Content:
+# Neural Stochastic Flows: Solver-Free Modelling and Inference for SDE Solutions 
+
+Naoki Kiyohara 1,2∗ Edward Johns 1 Yingzhen Li 11Imperial College London 2Canon Inc. 
+
+{n.kiyohara23, e.johns, yingzhen.li}@imperial.ac.uk 
+
+# Abstract 
+
+Stochastic differential equations (SDEs) are well suited to modelling noisy and/or irregularly-sampled time series, which are omnipresent in finance, physics, and machine learning applications. Traditional approaches require costly simulation of numerical solvers when sampling between arbitrary time points. We introduce 
+
+Neural Stochastic Flows (NSFs) and their latent dynamic versions, which learn (latent) SDE transition laws directly using conditional normalising flows, with architectural constraints that preserve properties inherited from stochastic flow. This enables sampling between arbitrary states in a single step, providing up to two orders of magnitude speedup for distant time points. Experiments on synthetic SDE simulations and real-world tracking and video data demonstrate that NSF maintains distributional accuracy comparable to numerical approaches while dramatically reducing computation for arbitrary time-point sampling, enabling applications where numerical solvers remain prohibitively expensive. 
+
+# 1 Introduction 
+
+Stochastic differential equations (SDEs) underpin models in finance, physics, biology, and modern machine learning systems [ 39 , 50 ]: they capture how a state xt ∈ Rd evolves following a velocity field whilst being perturbed by random noise. In many real-time settings such as robots, trading algorithms, or digital twins, one often requires the transition law p(xt | xs) describing the probability distribution of future states given earlier states over arbitrary time gaps t − s [ 30 ]. Conventional approaches handle this transition law by learning neural (latent) SDEs [ 33 ] from data and simulating numerical solvers with many small steps [ 19 , 30 ], which incurs high computational costs. In this regard, neural flow [ 4 ] techniques for ordinary differential equations (ODEs) bypass numerical integration by directly learning the flow map with architectural constraints and regularisation terms. However, these methods inherently cannot express stochastic dynamics required for SDE modelling. In the domain of diffusion models [ 12 , 20 , 47 ], a line of work leverages the associated probability flow ODE (PF-ODE): earlier distillation approaches compress iterative samplers by matching teacher-student trajectories under the PF-ODE [ 44 ], while consistency-style methods learn direct mappings between time points [ 48 ], with trajectory-level variants also proposed [ 26 ]. However, these techniques are tied to particular boundary conditions and diffusion processes. An alternative approach for modelling stochastic dynamics data is through stochastic flows [ 32 ], which, under suitable conditions, describe families of strong solutions to SDEs via mappings that evolve initial states over time under shared stochasticity. These flows naturally define the transition law p(xt | xs), and when parameterised by neural networks, enable direct learning of efficient one-step sampling between arbitrary time points. However, it remains an unsolved challenge for such network design, due to the requirements of satisfying several properties, e.g., identity mapping when 
+
+> ∗
+
+Project page: https://nkiyohara.github.io/nsf-neurips2025/ 
+
+39th Conference on Neural Information Processing Systems (NeurIPS 2025). Time     
+
+> State  x
+> (a) Sample trajectories
+> xs
+> Time
+> State  x
+> (b) Conditional distribution
+> xs
+> xtxu
+> xs
+> p(xu|xs)
+> (c) One-step transition
+> xs
+> p(xt|xs)Rp(xt|xs)p(xu|xt)d xt
+> (d) Two-step transition Flow loss
+
+Figure 1: Comparison between (a) traditional neural SDE methods requiring numerical integration and (b) our NSF, where blue and red contours represent conditional distributions for one-step sampling and recursive application, respectively. Panels (c) and (d) illustrate our flow loss concept, ensuring distributional consistency between one-step and two-step transitions through intermediate states. 
+
+t = s, Markov property, and Chapman–Kolmogorov flow property that ensures self-consistency of transition laws with different number of steps. 
+
+Contributions. We introduce Neural Stochastic Flows (NSFs) to address the network design challenge of parameterising stochastic flows. NSFs employ conditional normalising flows [ 41 , 52 ] to directly learn the SDE transition distributions p(xt | xs) for any s < t , where the normalising flow architecture design ensures the validity of identity, Markov, and (for autonomous SDEs) stationarity properties. Specifically, given the present state xs and elapsed time ∆t, NSF draws a single Gaussian noise vector and transforms it through specially designed affine coupling layers [ 13 , 28 ] that reduce to identity maps when ∆t := t − s = 0 [4 ]. These transformations have parameters conditioned on (xs, ∆t, s ) and scale their effect with the time interval. A bi-directional KL divergence based regularisation loss is designed to further encourage the network to satisfy Chapman–Kolmogorov flow property. Since all transformations are bijective, the transition log-density is available in closed form, allowing both training and inference to proceed without SDE solvers. A side-by-side schematic of solver-based vs. NSF sampling is shown in Fig. 1. To summarise, Neural Stochastic Flows can: • Learn an SDE’s weak solution, in the form of a conditional distribution, directly for solver-free training and inference, with architectural constraints and loss function design to enforce desirable stochastic flow properties; • Enable efficient one-step sampling between arbitrary time points within the trained horizon (thus suitable for modelling irregularly sampled time series), with maximum gains for distant time points; • Be extended to noisy and/or partially observed data scenarios through latent dynamic modelling, in similar fashions as variational state-space model and latent SDEs [31, 33]. Empirically, across diverse benchmarks such as stochastic Lorenz attractor, CMU Motion Capture, and Stochastic Moving MNIST, our approach maintains distributional accuracy comparable to or better than numerical solver methods, while delivering up to two orders of magnitude faster predictions over arbitrary time intervals, with the largest gains on long-interval forecasts. 
+
+# 2 Background 
+
+Stochastic Differential Equations. Stochastic differential equations (SDEs) model dynamical systems subject to random perturbations: 
+
+dxt = μ(xt, t ) d t + σ(xt, t ) d W t, (1) where xt ∈ Rn is the state, μ : Rn × R+ → Rn is the drift, σ : Rn × R+ → Rn×m is the diffusion, and W t is an m-dimensional Wiener process. Neural SDEs parameterise these terms with neural networks, enabling learning from data. In many applications, the conditional probability distribution 2p(xt | xs) for s < t is crucial for uncertainty quantification and probabilistic forecasting. However, while numerical solvers can generate sample trajectories, they do not provide direct access to this distribution and incur computational costs that scale with the time gap t − s.
+
+Stochastic Flows of Diffeomorphisms. An alternative perspective on SDEs comes from the theory of stochastic flows, which characterises the solution space through time-dependent mappings. For an Itô SDE as in Eq. (1) with smooth coefficients, these solutions form a stochastic flow of diffeomorphisms 
+
+[ 32 ]. This is defined by a measurable map ϕs,t : Rn × Ω → Rn where 0 < s < t < +∞ and Ω is the sample space, satisfying: 1. Diffeomorphism : For any s < t and ω ∈ Ω, the map x 7 → ϕs,t (x, ω) is almost surely a diffeomorphism. 2. Independence : Maps ϕt1,t 2 , . . . , ϕtn−1,t n for any non-overlapping sequence 0 ≤ t1 ≤ t2 ≤
+
+. . . ≤ tn are independent, which yields the Markov property of the flow. 3. Flow property : For any 0 ≤ t1 ≤ t2 ≤ t3, any point x ∈ Rn, and any ω ∈ Ω:
+
+ϕt1,t 3 (x, ω) = ϕt2,t 3
+
+ ϕt1,t 2 (x, ω), ω .
+
+4. Identity property : For any t ≥ 0, any point x ∈ Rn, and any ω ∈ Ω: ϕt,t (x, ω) = x.Furthermore, when the SDE is autonomous, where the drift and diffusion terms are independent of time, an additional property holds: 5. Stationarity : For any s ≤ t, r ≥ 0, and ω ∈ Ω, the maps ϕs,t (x, ω) and ϕs+r,t +r (x, ω)
+
+have the same probability distribution. Solver-based neural SDEs (also see Section 5) require costly numerical integration. Leveraging the flow properties formalised above, in the next section we introduce a solver-free alternative, NSFs, as efficient models for stochastic systems that provide direct access to transition probability distributions of SDE-governed processes. 
+
+# 3 Neural Stochastic Flows 
+
+While stochastic flows of diffeomorphisms provide a powerful theoretical framework for understand-ing strong solutions of SDEs, they require modelling infinite-dimensional sample paths, which is computationally intractable. Instead, in this section we focus on developing neural network architec-tures for modelling the probability distributions that characterise weak solutions of SDEs, by deriving appropriate conditions and loss functions for the network using properties of stochastic flows. For an SDE, the relationship between a strong solution (represented by a stochastic flow ϕ) to its corresponding weak solution (represented by a conditional probability distribution) is expressed as: 
+
+p(xtj | xti ; ti, t j − ti) := 
+
+Z
+
+> Ω
+
+δ
+
+
+
+xtj − ϕti,t j (xti , ω)
+
+
+
+p(ω) d ω, (2) where δ(·) denotes the Dirac delta function and Ω represents the infinite-dimensional sample space containing complete Brownian motion trajectories. Instead of directly modelling the map ϕ, we approximate the resulting probability distribution pθ (xtj | xti ; ti, t j − ti) ≈ p(xtj | xti ; ti, t j − ti)
+
+using a Neural Stochastic Flow (NSF), a parametric model fθ that transforms Gaussian samples ε
+
+into the desired distributions via conditional normalising flows: 
+
+pθ (xtj | xti ; ti, t j − ti) = 
+
+Z
+
+δ xtj − fθ (xti , t i, t j − ti, ε) N (ε | 0, I) d ε, (3) Therefore fθ serves as our parametric model to approximate the SDE’s weak solution. 
+
+Conditions. Under the NSF framework, in below we reformulate the conditions of stochastic flows as strong solutions of SDEs to conditions of NSFs as weak solutions: 1. Independence : For any sequence 0 ≤ t1 ≤ t2 ≤ . . . ≤ tn, the conditional probabilities 
+
+pθ (xt2 | xt1 ; t1, t 2 − t1), . . . , p θ (xtn | xtn−1 ; tn−1, t n − tn−1) must be independent. 2. Flow property : For any 0 ≤ ti ≤ tj ≤ tk, the joint distribution must satisfy the Chapman– Kolmogorov equation: 
+
+pθ (xtk | xti ; ti, t k − ti) = 
+
+Z
+
+pθ (xtk | xtj ; tj , t k − tj )pθ (xtj | xti ; ti, t j − ti) d xtj . (4) 33. Identity property : At the same time t, the distribution must reduce to a delta function, indicating no change: pθ (xti = x | xti ; ti, 0) = δ(x − xti ).
+
+For autonomous SDEs, we restate the stationarity condition in terms of our parametric model: 4. Stationarity : The conditional distributions must exhibit stationarity such that for any ti, t j , r ≥
+
+0, pθ (xtj | x; ti, t j − ti) = pθ (xtj +r | x; ti + r, t j − ti).
+
+3.1 Conditional Normalising Flow Design 
+
+Let c := ( xti , ∆t, t i) denote the conditioning parameters, where ti is included only for non-autonomous systems and omitted otherwise, and let ∆t := tj − ti. We instantiate the sampling procedure of the flow distribution (Eq. (3)) as 
+
+z = xti + ∆ t · MLP μ(c; θμ)
+
+| {z }
+
+> μ(c)
+
++ √∆t · MLP σ (c; θσ )
+
+| {z }
+
+> σ(c)
+
+⊙ ε, ε ∼ N (0, I), (5) 
+
+xtj = fθ (z, c) = fL(·; c, θL) ◦ fL−1(·; c, θL−1) ◦ · · · ◦ f1(z; c, θ1). (6) Our architecture integrates a parametric Gaussian initialisation with a sequence of bijective transfor-mations. The state-dependent Gaussian, centred at μ(c) with noise scale σ(c), follows the similar form to the Euler–Maruyama discretisation with drift scaled by ∆t and diffusion by √∆t. The subsequent bijective transformations f 1 through f L are implemented as conditioned coupling flows [4, 13 , 28 ] whose parameters depend on c. Each layer splits the state z into two partitions (zA, zB)
+
+and applies an affine update to one partition conditioned on the other and on c:
+
+fi(z; c, θi) = Concat 
+
+
+
+zA, zB ⊙exp  ∆t MLP (i)
+
+> scale
+
+(zA, c; θ(i)
+
+> scale
+
+)+∆ t MLP (i)
+
+> shift
+
+(zA, c; θ(i)
+
+> shift
+
+)
+
+
+
+, (7) with alternating partitions across layers. The explicit ∆t factor ensures f i(z; c, θi) = z when 
+
+∆t = 0 and, combined with the form of the base Gaussian (Eq. (5) ), preserves the identity at zero time gap. Stacking such layers yields an expressive diffeomorphism [ 49 ] while keeping the Jacobian log-determinant tractable for loss computation. Independence property is ensured by the conditional sampling on the initial state xti without any overlap between the transitions, and stationarity is obtained by omitting ti from c when modelling autonomous SDEs. 
+
+3.2 A Regularisation Loss for Flow Property 
+
+To train an NSF, apart from using supervised learning loss functions based on e.g., maximum likeli-hood, we add an additional discrepancy term Lflow that encourages the flow property as formalised in Eq. (4) . We require a measure of mismatch between the one-step distribution pθ (xtk | xti )
+
+and the two-step marginal R pθ (xtk | xtj ) pθ (xtj | xti ) d xtj . Several candidates exist such as optimal-transport/Wasserstein, Stein, adversarial, and kernel MMD. Among them, we choose KL divergences because we can minimise the upper-bounds of the KL divergences in a tractable way, and since KL is asymmetric, we use both directions: the forward KL promotes coverage, while the reverse KL penalises unsupported regions. Direct KLs remain intractable due to the marginalisation over in-termediate state xtj in two-step side. Therefore, we introduce a bridge distribution bξ(xtj | xti , xtk )
+
+as an auxiliary variational distribution [ 1, 40 , 45 ] and optimise variational upper bounds for both directions (Appendix B). Specifically, for the forward KL divergence: 
+
+DKL 
+
+
+
+pθ (xtk | xti )
+
+Z
+
+pθ
+
+ xtk | xtj
+
+ pθ
+
+ xtj | xti
+
+ dxtj
+
+
+
+≤ E   
+
+> xtk∼pθ(·| xti)
+
+"
+
+E   
+
+> xtj∼bξ(·| xti,xtk)
+
+"
+
+log pθ (xtk | xti ) bξ
+
+ xtj | xti , xtk
+
+
+
+pθ
+
+ xtk | xtj
+
+ pθ
+
+ xtj | xti
+
+# # 
+
+=: Lflow , 1-to-2 (θ, ξ; ti, t j , t k) . (8) And for the reverse KL divergence: 
+
+DKL 
+
+Z 
+
+pθ
+
+ xtk | xtj
+
+ pθ
+
+ xtj | xti
+
+ dxtj pθ (xtk | xti )
+
+
+
+4Algorithm 1: Optimisation procedure for (Latent) Neural Stochastic Flows Follow ♦ for NSF, ♠ for Latent NSF; lines without markers are run for both models. 
+
+Input: Transition dataset D; learning rates ηθ , η ξ (and ηϕ, η ψ for latent); inner steps K
+
+Output: Trained parameters θ, ξ (and ϕ, ψ for latent) 
+
+while not converged do 
+
+Sample a minibatch from D
+
+♠ Encode sampled data into latent states using Eq. (15) Sample time triplets (ti, t j , t k) with ti < t j < t k (see Appendix B for details) 
+
+for k = 1 to K do 
+
+Compute Lflow (θ, ξ) using Eq. (10) Update bridge parameters: ξ ← ξ − ηξ ∇ξLflow 
+
+♦ Compute total loss L(θ, ξ) using Eq. (11) 
+
+♠ Compute total loss L(θ, ξ, ϕ, ψ) using Eq. (18) 
+
+♦ Update NSF parameters: θ ← θ − ηθ ∇θ L
+
+♠ Update NSF/encoder/decoder parameters: {θ, ϕ, ψ} ← { θ, ϕ, ψ} − η{θ,ϕ,ψ } ∇{θ,ϕ,ψ}L≤ E   
+
+> xtj∼pθ(·| xti)
+
+"
+
+E   
+
+> xtk∼pθ(·| xtj)
+
+"
+
+log pθ
+
+ xtj | xti
+
+ pθ
+
+ xtk | xtj
+
+
+
+bξ
+
+ xtj | xti , xtk
+
+ pθ (xtk | xti )
+
+# # 
+
+=: Lflow , 2-to-1 (θ, ξ; ti, t j , t k) . (9) The flow loss Lflow combines the above two terms, balancing the consistency in both directions: 
+
+Lflow (θ, ξ) = E  
+
+> p(ti,t j,t k)
+
+[Lflow , 1-to-2(θ, ξ; ti, t j , t k) + Lflow , 2-to-1(θ, ξ; ti, t j , t k)] , (10) The total loss for training NSFs combines the negative log-likelihood objective with the flow loss: 
+
+L(θ, ξ) = − E   
+
+> (xti,xtj,t i,t j)∼D
+
+log pθ (xtj | xti ; ti, t j − ti) + λ Lflow (θ, ξ), (11) where D represents the dataset and λ is a hyperparameter that controls the strength of the flow consistency constraint. The model parameters θ and bridge model parameters ξ are optimised using gradient-based methods; a procedure is summarised in Algorithm 1 (see Appendix C.1 for details). 
+
+# 4 Latent Neural Stochastic Flows 
+
+Irregularly-sampled real-world sequences seldom expose the full system state; instead we observe noisy measurements oti at times 0 = t0 < t 1 < · · · < t T . To model the hidden continuous-time dynamics while remaining solver-free, we introduce the Latent Neural Stochastic Flows (Latent NSFs) as variational state-space models (VSSMs) whose transition kernels are governed by NSFs. 
+
+4.1 Recap: Variational State-Space Models (VSSMs) 
+
+A VSSM [ 8, 21 , 22 , 31 ] extends the variational autoencoder framework [ 29 , 42 ] to sequential data by endowing a sequence of latent states x0: T with Markovian dynamics while explaining the observations 
+
+o0: T through a conditional emission process. The joint distribution factorises as 
+
+pθ,ψ (x0: T , o0: T ) = pθ (x0)
+
+> T
+
+Y
+
+> t=1
+
+pθ (xt | xt−1)pψ (ot | xt), (12) where each conditional is typically Gaussian with its distributional parameters produced by neural networks. Amortised inference is carried out using a Gaussian encoder qϕ(xt | xt−1, ot) for every time-step t, and the encoder and decoder are jointly trained using the negative evidence lower bound (NELBO) loss, also known as the variational free energy (VFE): 
+
+L(θ, ψ, ϕ) = E
+
+> qϕ
+
+"
+
+−log pθ (x0)−
+
+> T
+
+X
+
+> t=1
+
+[log pθ (xt | xt−1)+log pψ (ot | xt)−log qϕ(xt | xt−1, ot)] 
+
+#
+
+.
+
+(13) 5x0 x1 x2  
+
+> o0o1o2
+
+(a) Variational State-Space Model      
+
+> xt0xt1xt2
+> ∆t1∆t2
+> ot0ot1ot2
+
+(b) Latent Neural Stochastic Flow    
+
+> xt0
+> ot0
+> ot0ot1ot2
+> xt2
+> xt2
+> ∆t1+ ∆ t2
+
+(c) Skip KL Divergence 
+
+Figure 2: Graphical models. (a) Standard state-space model with discrete-time transitions between states. (b) NSF model with continuous-time transitions parameterised by time intervals ( ∆ti := 
+
+ti − ti−1). (c) Example of skip KL divergence over two time steps. The upper row shows the two-step-ahead prediction from the posterior at t0 via NSF, while the lower row shows the posterior at t2
+
+conditioned on all observations (ot0 , ot1 , ot2 ). Across all models: solid arrows represent generative processes, dashed arrows represent inference processes, wavy arrows in (c) represent KL divergences. 
+
+4.2 Neural Stochastic Flows as Latent Transition Kernels 
+
+To model irregularly-sampled time series, we require the latent dynamics to evolve in continuous-time. We therefore implement the transition distribution pθ (xt | xt−1) in (12) with an NSF pθ (xtj |
+
+xti ; ti−1, ∆ti) which parameterises the weak solution of an SDE as follows. As illustrated in Fig. 2(a), a standard VSSM uses discrete-time transitions, whereas latent NSFs in Fig. 2(b) incorporates continuous-time dynamics through time intervals. 
+
+Generative model. Let xti ∈ Rd be the latent state and ∆ti := ti − ti−1. The joint distribution factorises as 
+
+pθ,ψ
+
+ xt0: T , ot0: T
+
+ = pθ (xt0 )
+
+> T
+
+Y
+
+> i=1
+
+pθ
+
+ xti xti−1 ; ti−1, ∆ti
+
+ pψ (oti | xti ) , (14) where pθ (xti | xti−1 ; ·) is an NSF, hence supports arbitrary ∆ti without numerical integration. 
+
+Variational posterior. For the inference model, we employ a recurrent neural network encoder that processes the observation sequence [7]: 
+
+qϕ(xt0: T | o≤tT ) = 
+
+> T
+
+Y
+
+> i=0
+
+N  xti mti , diag  s2
+
+> ti
+
+ , (mti , sti ) = GRU ϕ
+
+ [oti , ∆ti, t i], hti−1
+
+ ,
+
+(15) with ht−1 = 0, and the absolute time ( ti−1 in Eq. (14) and ti in Eq. (15) ) is only included for non-autonomous systems and omitted when modelling autonomous SDEs. 
+
+Learning objective. Our goal is to train generative model pθ,ψ
+
+ xt0: T , ot0: T
+
+ and inference model 
+
+qϕ(xt0: T | o≤tT ). A standard choice is the β-weighted negative ELBO ( β-NELBO) loss [18]: 
+
+Lβ-NELBO =
+
+> T
+
+X
+
+> i=0
+
+h
+
+− E
+
+> qϕ
+
+log pψ (oti | xti ) + βD KL 
+
+ qϕ(xti | o≤ti ) pθ (xti | xti−1 )i
+
+, (16) which focuses only on adjacent time steps, potentially leading to the error accumulation for long-term dependencies. To address this, we propose to add a skip-ahead KL divergence loss (Fig. 2(c)): 
+
+Lskip = 
+
+> T−τ
+
+X
+
+> i=0
+
+E 
+
+> j∼U{ i+2 ,τ }
+
+DKL 
+
+ qϕ(xtj | o≤tj ) pθ (xtj | xti ) . (17) Unlike traditional overshooting methods [ 16 ] that require recursive transitions, latent NSF enables direct sampling across arbitrary time gaps, enabling this objective to be computed efficiently. Combining the above two losses and the flow loss (Eq. (10)), we get the total loss: 
+
+Ltotal = Lβ-NELBO + λ Lflow + βskip Lskip , (18) where λ and βskip are hyperparameters that control the strength of the flow loss and skip-ahead KL divergence loss, respectively. A training procedure for the latent model is summarised in Algorithm 1 (see Appendix C.2). 65 Related Work 
+
+We categorise prior work in terms of whether learning and/or sampling avoid fine-grained numerical time-stepping, and the class of dynamics targeted, as summarised in Table 1. Table 1: Solver requirement across continuous-time differential equation models. ‘Pre-defined diffusion SDEs/ODEs’ refers to a boundary-conditioned diffusion process bridging a fixed base distribution and the data distribution utilised in diffusion models.                            
+
+> Method(s) Target dynamics Solver-free training Solver-free inference
+> Neural ODEs [6] General ODEs ✗✗
+> Neural flows [4] General ODEs ✓✓
+> Score-based diffusion via re-verse SDEs/PF-ODEs [ 47 ]; flow matching [34] Pre-defined diffusion SDEs/ODEs
+> ✓✗
+> Progressive distillation [44] Pre-defined diffusion SDEs/ODEs
+> ✗✓
+> Consistency models [ 26 ,48 ]; rectified flows [35] Pre-defined diffusion SDEs/ODEs
+> ✓✓
+> Neural (latent) SDEs [ 25 ,33 ,38, 46, 50] General Itô SDEs ✗✗
+> ARCTA [ 9]; SDE matching [3] General Itô SDEs ✓✗
+> Neural Stochastic Flows General Itô SDEs ✓✓
+
+Modelling general ODEs. Neural ODEs [ 6] learn a parametric vector field that is integrated by a numerical solver at both training and test time. Their runtime there-fore scales with the number of function evaluations required by the solver. Neural flows [ 4] side-step this cost by learning the solution map directly. 
+
+Modelling prescribed SDEs/PF-ODEs. 
+
+Score-based generative models [ 47 ] and flow matching [ 34 ] are continuous-time generative models that learn reverse SDEs/PF-ODEs of boundary-conditioned diffusion processes. Fast generation meth-ods have been developed through learn-ing direct mappings [ 26 , 48 ] or vector-field straightening [ 34 , 53 ]. However, they are specifically designed for prescribed boundary-conditioned diffusion processes, and do not provide a general transition den-sity for arbitrary SDEs. 
+
+Modelling general SDEs. Neural (latent) SDEs [ 25 , 33 , 38 , 50 ] utilise neural net-works to model the drift and diffusion terms of an SDE and approximate its trajectories via stochastic solvers, whose computational cost grows linearly with the prediction horizon. Recent advances have aimed to mitigate this cost by improving sampling efficiency [ 46 ] or by introducing solver-free approaches such as ARCTA [ 9 ] and SDE matching [ 3], which learn latent SDEs by modelling posterior marginals and aligning them to the prior dynamics. However, all these methods remain solver-dependent at inference time. 
+
+Position of the present work. NSF unifies the solver-free philosophy of neural flows with the expressive power of neural (latent) SDEs. It learns the Markov transition density as a conditional normalising flow, which satisfies the conditions of weak solutions of SDEs by design and regularisa-tion objectives. Unlike diffusion model-specific accelerations, NSF handles arbitrary Itô SDEs and extends naturally to latent sequence models. The resulting method removes numerical integration while retaining closed-form likelihoods. 
+
+# 6 Experiments 
+
+We evaluate NSF and latent NSF on three diverse tasks: modelling a synthetic stochastic Lorenz attractor [ 33 , 36 ], predicting real-world human motion (CMU Motion Capture [ 15 ]), and generative video modelling (Stochastic Moving MNIST [ 11 ]). Our goal is to show that (latent) NSF matches or improves upon the accuracy (task-specific metrics) of solver-based neural SDEs while drastically reducing computational cost in terms of FLOPs and runtime. Full details are in Appendix E. 
+
+6.1 Stochastic Lorenz Attractor 
+
+We first test NSF on the stochastic Lorenz system [ 33 , 36 ], a standard chaotic dynamics benchmark. We use the setup from Li et al. [33] , generating 1,024 training trajectories and comparing against baselines including latent SDE [ 33 ], SDE matching [ 3 ], and Stable Neural SDE variants (Neural LSDE, Neural GSDE, Neural LNSDE) [ 38 ] as baselines. Performance is measured by KL divergence (estimated via kernel density estimation) between generated and true distributions, and computational cost via FLOPs and runtime (details in Appendix E.2). 7Table 2: Comparison on KL divergence and FLOPs at different time steps. Hpred indicates the maximum single-step prediction horizon for NSF; see text for details on recursive application. Average runtime per 100 samples for latent SDE (JAX): 124–148 ms; NSF (JAX): 0.3 ms (see Appendix E.2.5).                                                                                                                                                                     
+
+> Method t= 0 .25 t= 0 .5t= 0 .75 t= 1 .0
+> KL kFLOPs KL kFLOPs KL kFLOPs KL kFLOPs Latent SDE [33] 2.1±0.9959 1.8±0.11,917 0.9±0.32,839 1.5±0.53,760 Neural LSDE [38] 1.3±0.41,712 7.2±1.43,416 74 .5±24 .65,057 53 .1±29 .36,699 Neural GSDE [38] 1.2±0.41,925 3.9±0.33,848 20 .2±7.65,698 14 .1±8.47,548 Neural LNSDE [38] 1.7±0.41,925 4.6±0.73,848 57 .3±16 .45,698 44 .6±23 .47,548 SDE matching [3]
+> ∆t= 0 .0001 4.3±0.7184,394 5.3±1.0368,787 3.4±0.8553,034 3.8±1.0737,354
+> ∆t= 0 .01 6.3±0.41,917 11 .7±0.53,834 7.9±0.35,677 6.0±0.37,520 NSF (ours)
+> Hpred = 1 .00.8±0.753 1.3±0.153 0.6±0.353 0.2±0.653
+> Hpred = 0 .52.4±1.953 1.3±0.153 1.0±0.4105 1.7±1.1105
+> Hpred = 0 .25 1.2±0.753 1.2±0.1105 0.8±0.4156 1.3±0.8208
+
+Table 3: Test MSE and 95% confidence interval based on t-statistic on Motion Capture datasets. † indicates results from Yildiz et al. [54] , ∗ from Li et al. [33] , ‡
+
+from Course and Nair [9] , and § from Ansari et al. [2] .All other results are our reproductions. Average run-time per 100 samples: latent SDE (JAX) - 75ms; Latent NSF (JAX) - 3.5ms (detailed in Appendix E.3.7). 
+
+Methods Setup 1 Setup 2 npODE [17] 22.96 † –Neural ODE [6] 22.49 ± 0.88 † –ODE2VAE-KL [54] 8.09 ± 1.95 † –Latent ODE [43] 5.98 ± 0.28 ∗ 31.62 ± 0.05 §
+
+Latent SDE [33] 12.91 ± 2.90 1 9.52 ± 0.21 §
+
+Latent Approx SDE [46] 7.55 ± 0.05 § 10.50 ± 0.86 ARCTA [9] 7.62 ± 0.93 ‡ 9.92 ± 1.82 NCDSSM [2] 5.69 ± 0.01 § 4.74 ± 0.01 §
+
+SDE matching [3] 5.20 ± 0.43 2 4.26 ± 0.35 Latent NSF (ours) 8.62 ± 0.32 3.41 ± 0.27 
+
+Fig. 3 shows paths from each method; NSF traces visually coincide with the true at-tractor whereas solver-based methods over-spread. Quantitatively in Table 2, NSF (Hpred = 1 .0, single-step) achieves the low-est KL divergence and with significantly fewer FLOPs. This leads to substantial runtime savings (approx. 0.3 ms vs. >
+
+100 ms per batch, Appendix E.2.5). No-tably, our flow-based training objective en-ables both single-step and recursive appli-cation variants to maintain relatively low KL divergence across different time hori-zons, with NSF remaining computationally cheaper in these configurations. This con-firms NSF’s capability to accurately model complex SDEs efficiently. 
+
+6.2 CMU Motion Capture 
+
+We evaluate Latent NSF on the CMU Mo-tion Capture walking dataset [ 15 ]. The 23-sequence walking subset is down-sampled to 300 time steps and split 16/3/4 for train/validation/test, matching prior work [ 51 , 54 ]. We report two established protocols. 
+
+(a) Ground truth (b) Latent SDE (c) SDE matching (d) NSF (one-step, ours) 
+
+Figure 3: Comparison of generated samples (64 samples per panel) on the stochastic Lorenz attractor. Baseline methods are simulated step-by-step. For NSF, each point is an independent sample from the learnt conditional distribution p(xt | xs) originating from the same initial state and seed, connected visually for comparison. This visualisation choice aids in assessing distributional accuracy over time. 810 −1 10 0 10 1 10 2 10 3        
+
+> Runtime ←(ms, log scale)
+> 10
+> 20
+> 30
+> MSE  ←
+> (a)
+> Latent SDE
+> Latent NSF
+> 10 010 110 210 310 4
+> Runtime ←(ms, log scale)
+> 10
+> 20
+> 30
+> 40
+> MSE  ←
+> (b)
+> Latent SDE
+> Latent NSF
+
+Figure 4: Trade-off between prediction accuracy (MSE) and computational cost (runtime, using JAX) for latent SDE and Latent NSF on CMU Motion Capture dataset. (a) Setup 1: Within-horizon forecasting. (b) Setup 2: Beyond-horizon extrapolation. 
+
+Within-horizon forecasting (Setup 1) [33 , 54 ]. All 300 time steps are used during training; for tests, only the first three observations are revealed and the model must forecast the remaining 297 steps. 
+
+Beyond-horizon extrapolation (Setup 2) [ 2]. The last third segment of every sequence (steps 200–299) is withheld from training. At test time the model receives the first 100 observations and must predict the next 200 steps that lie beyond the training horizon. Table 3 shows the results. In Setup 1, Latent NSF (single-step prediction) performs similarly to latent SDE models. Crucially, in the Setup 2 extrapolation task, latent NSF achieves state-of-the-art MSE. These extrapolation gains align with the relevance of state-dependent stochasticity in human motion. Nonlinear SDE formulations often require learning complex, time-varying posterior structures (e.g., controlled SDEs or complicated conditional marginals). By contrast, Latent NSF directly models the Markov transition with conditional normalising flows, sidesteps these optimisation challenges. Fig. 4 illustrates the trade-off between prediction accuracy and computational cost. While latent SDE adjusts the discretisation step size to balance accuracy and speed, Latent NSF controls this trade-off by varying the number of recursive applications. Latent NSF achieves better performance while being approximately more than two orders of magnitude faster than latent SDE in both setups, as detailed in Appendix E.3.7. 
+
+6.3 Stochastic Moving MNIST 
+
+Finally, we test Latent NSF on high-dimensional video using a Stochastic Moving MNIST [ 11 ]variant with physically plausible bouncing dynamics: digits undergo perfect specular reflection with small angular noise, avoiding the unphysical velocity resets of the original code. The task involves modelling two digits moving in a 64x64 frame. We train on 60k sequences and test on 10k held-out sequences. We evaluate using Fréchet distances (FD) on embeddings from a pre-trained SRVP model [ 14 ], measuring static content, dynamics, and frame similarity (validated in Appendix G). We compare our Latent NSF model against the latent SDE [ 33 ] as the main baseline, representing the current representative solver-based neural SDE model. Table 4 and Fig. 5 show that Latent NSF (recursive and one-step) achieves competitive Static FD and Frame-wise FD compared to the latent SDE baseline. Dynamics FD for recursive NSF is slightly higher in this run, but visualisations suggest comparable dynamics capture (see Appendix E.4.5). The decline after step 35 across all models reflects the digits approaching a uniform spatial distribution, indicating a limitation of this metric when evaluating long-term predictions in feature spaces fitted to Gaussian distributions. Nevertheless, Latent NSF offers significant potential for computational speedup over the solver-based latent SDE (e.g., latent SDE: 751 ms vs. Latent NSF (one-step): 358         
+
+> 1Li et al. [33] report 4.03 ±0.20 for Setup 1; our re-implementation and other reproductions observe higher MSE. Details are provided in Appendix E.3.2.
+> 2Bartosh et al. [3] report 4.50 ±0.32 for Setup 1; however, at the time of writing, official code for CMU Motion Capture is not yet available. We report our re-implementation here to maintain consistency across Setups 1 and 2. Details of our reproduction are provided in Appendix E.3.3.
+
+9Table 4: Fréchet distance comparison on Stochastic Moving MNIST using pre-trained SRVP embeddings. The lower the better. Note that dynamics FD is ill-defined for one-step simulation of latent NSF, which only predicts the marginal distribution of the future frames conditioned on the last observation.                                  
+
+> Methods Static FD Dynamics FD Frame-wise FD Latent SDE 2.66 ±0.87 5.39 ±3.10 0.58 ±0.21 Latent NSF (recursive) 2.36 ±0.60 7.76 ±2.56 0.63 ±0.17 Latent NSF (one-step) 1.67 ±0.47 –0.63 ±0.15
+> 25 30 35 40 45
+> Time step
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> Fréchet distance  Latent NSF
+> (one-step)
+> Latent NSF
+> (recursive) Latent SDE
+
+Figure 5: Comparison of frame-wise Fréchet distance across time-steps on Stochastic Moving MNIST. ms for full-sequence prediction; see Appendix E.4.5). This demonstrates NSF’s promise for scaling to high-dimensional stochastic sequence modelling. 
+
+# 7 Discussion 
+
+Neural Stochastic Flows (NSFs) represent a novel paradigm for continuous-time stochastic modelling by directly learning weak solutions to SDEs as conditional distributions. Through carefully designed architectural constraints and regularisation objectives, NSF circumvents numerical integration while providing closed-form transition densities via normalising flows. The latent NSF extension enables applications to partially observed or high-dimensional time series, preserving efficient one-step transitions within a principled variational state-space modelling framework. Our comprehensive evaluation across chaotic dynamical systems, human motion capture, and video sequences demonstrates that the proposed flow-based approach achieves comparable or superior performance relative to solver-based neural SDEs while reducing computational requirements by two orders of magnitude. Moreover, it attains state-of-the-art long-horizon extrapolation performance in latent settings. These results collectively establish that learning distributional flows, rather than the underlying vector fields required by numerical solvers, constitutes an effective and computationally efficient paradigm for real-time stochastic modelling. 
+
+Limitations. Several limitations remain. First, Chapman–Kolmogorov consistency is enforced only approximately via variational bounds, potentially yielding discrepancies beyond the training regime. We recommend systematic monitoring of flow losses on held-out data with appropriate adjustments. Second, the selection of maximum one-shot horizon necessitates careful balance between computational efficiency and predictive accuracy. Third, while our affine coupling architecture guarantees analytical Jacobian computation, it imposes constraints on the form of the architecture. 
+
+Future work. Extending NSF to action-conditioned settings could enable direct integration with control algorithms such as model predictive control and reinforcement learning. Additionally, bridging NSF with diffusion models presents opportunities for leveraging complementary strengths of both frameworks in continuous-time modelling. Another natural direction is to explore stronger flow parameterisations. In particular, transformer-based flows such as TarFlow [ 55 ] may relax the structural constraints of affine coupling while retaining tractable Jacobians, potentially further improving expressivity. These extensions would significantly broaden the applicability of NSF to decision-making and generative tasks. Application-wise, the resulting analytical tractability, coupled with empirically demonstrated two-order-of-magnitude computational speedups, renders NSF particularly suitable for diverse applica-tions, from high-frequency trading scenarios requiring real-time robotic control and fast simulations to large-scale digital twin implementations. 
+
+Broader Impact Statement. This paper presents work whose goal is to advance machine learning research. There may exist potential societal consequences of our work, however, none of which we feel must be specifically highlighted here at the moment of paper publication. 10 References 
+
+[1] F. V. Agakov and D. Barber. An auxiliary variational method. In Neural Information Pro-cessing, 11th International Conference, ICONIP 2004, Calcutta, India, November 22-25, 2004, Proceedings , volume 3316 of Lecture Notes in Computer Science , pages 561–566. Springer, 2004. doi: 10.1007/978-3-540-30499-9\_86. URL https://doi.org/10.1007/ 978-3-540-30499-9_86 .[2] A. F. Ansari, A. Heng, A. Lim, and H. Soh. Neural continuous-discrete state space models for irregularly-sampled time series. In A. Krause, E. Brunskill, K. Cho, B. Engelhardt, S. Sabato, and J. Scarlett, editors, Proceedings of the 40th International Conference on Machine Learning ,volume 202 of Proceedings of Machine Learning Research , pages 926–951. PMLR, 23–29 Jul 2023. URL https://proceedings.mlr.press/v202/ansari23a.html .[3] G. Bartosh, D. Vetrov, and C. A. Naesseth. SDE matching: Scalable and simulation-free training of latent stochastic differential equations. In Proceedings of the 42nd International Conference on Machine Learning (ICML) , 2025. [4] M. Biloš, J. Sommer, S. S. Rangapuram, T. Januschowski, and S. Günnemann. Neural flows: Efficient alternative to neural odes. In Advances in Neural Information Processing Systems (NeurIPS) , 2021. [5] J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, C. Leary, D. Maclaurin, G. Necula, A. Paszke, J. VanderPlas, S. Wanderman-Milne, and Q. Zhang. JAX: composable transformations of Python+NumPy programs, 2018. URL http://github.com/jax-ml/jax .[6] R. T. Q. Chen, Y. Rubanova, J. Bettencourt, and D. Duvenaud. Neural ordinary differential equations. In Advances in Neural Information Processing Systems (NeurIPS) , volume 31, pages 6572–6583, 2018. [7] K. Cho, B. van Merrienboer, Ç. Gülçehre, D. Bahdanau, F. Bougares, H. Schwenk, and Y. Bengio. Learning phrase representations using RNN encoder-decoder for statistical machine translation. In A. Moschitti, B. Pang, and W. Daelemans, editors, Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing, EMNLP 2014, October 25-29, 2014, Doha, Qatar, A meeting of SIGDAT, a Special Interest Group of the ACL , pages 1724–1734. ACL, 2014. doi: 10.3115/V1/D14-1179. URL https://doi.org/10.3115/v1/ d14-1179 .[8] J. Chung, K. Kastner, L. Dinh, K. Goel, A. C. Courville, and Y. Bengio. A recurrent latent variable model for sequential data. In Advances in Neural Information Processing Systems ,2015. [9] K. Course and P. B. Nair. Amortized reparametrization: Efficient and scalable variational inference for latent SDEs. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. URL https://openreview.net/forum?id=5yZiP9fZNv .[10] R. Daems, M. Opper, G. Crevecoeur, and T. Birdal. Variational inference for SDEs driven by fractional noise. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=rtx8B94JMS .[11] E. Denton and R. Fergus. Stochastic video generation with a learned prior. In J. G. Dy and A. Krause, editors, Proceedings of the 35th International Conference on Machine Learn-ing, ICML 2018, Stockholmsmässan, Stockholm, Sweden, July 10-15, 2018 , volume 80 of Proceedings of Machine Learning Research , pages 1182–1191. PMLR, 2018. URL 
+
+http://proceedings.mlr.press/v80/denton18a.html .[12] P. Dhariwal and A. Nichol. Diffusion models beat GANs on image synthesis. In Advances in Neural Information Processing Systems (NeurIPS) , volume 34, pages 8780–8794, 2021. [13] L. Dinh, J. Sohl-Dickstein, and S. Bengio. Density estimation using real NVP. In 5th Interna-tional Conference on Learning Representations (ICLR) , 2017. 11 [14] J. Franceschi, E. Delasalles, M. Chen, S. Lamprier, and P. Gallinari. Stochastic latent residual video prediction. In Proceedings of the 37th International Conference on Machine Learning, ICML 2020, 13-18 July 2020, Virtual Event , volume 119 of Proceedings of Machine Learning Research , pages 3233–3246. PMLR, 2020. URL http://proceedings.mlr.press/v119/ franceschi20a.html .[15] Z. Gan, C. Li, R. Henao, D. E. Carlson, and L. Carin. Deep temporal sigmoid belief networks for sequence modeling. In C. Cortes, N. Lawrence, D. Lee, M. Sugiyama, and R. Garnett, editors, Advances in Neural Information Processing Systems , volume 28. Curran Associates, Inc., 2015. URL https://proceedings.neurips.cc/paper_files/paper/2015/file/ 95151403b0db4f75bfd8da0b393af853-Paper.pdf .[16] D. Hafner, T. Lillicrap, I. Fischer, R. Villegas, D. Ha, H. Lee, and J. Davidson. Learning latent dynamics for planning from pixels. In K. Chaudhuri and R. Salakhutdinov, editors, Proceedings of the 36th International Conference on Machine Learning , volume 97 of Proceedings of Machine Learning Research , pages 2555–2565. PMLR, 09–15 Jun 2019. URL https:// proceedings.mlr.press/v97/hafner19a.html .[17] M. Heinonen, C. Yildiz, H. Mannerström, J. Intosalmi, and H. Lähdesmäki. Learning unknown ODE models with Gaussian processes. In J. Dy and A. Krause, editors, Proceedings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learning Research , pages 1959–1968. PMLR, 10–15 Jul 2018. URL https://proceedings. mlr.press/v80/heinonen18a.html .[18] I. Higgins, L. Matthey, A. Pal, C. Burgess, X. Glorot, M. Botvinick, S. Mohamed, and A. Lerchner. beta-VAE: Learning basic visual concepts with a constrained variational framework. In International Conference on Learning Representations , 2017. URL https: //openreview.net/forum?id=Sy2fzU9gl .[19] D. J. Higham. An algorithmic introduction to numerical simulation of stochastic differential equations. SIAM Review , 43(3):525–546, 2001. doi: 10.1137/S0036144500378302. URL 
+
+https://doi.org/10.1137/S0036144500378302 .[20] J. Ho, A. Jain, and P. Abbeel. Denoising diffusion probabilistic models. In Advances in Neural Information Processing Systems (NeurIPS) , volume 33, pages 6840–6851, 2020. [21] M. J. Johnson, D. K. Duvenaud, A. B. Wiltschko, R. P. Adams, and S. R. Datta. Composing graphical models with neural networks for structured representations and fast inference. In 
+
+Advances in Neural Information Processing Systems , 2016. [22] M. Karl, M. Soelch, J. Bayer, and P. van der Smagt. Deep variational bayes filters: Unsupervised learning of state space models from raw data. In International Conference on Learning Representations , 2017. URL https://openreview.net/forum?id=HyTqHL5xg .[23] P. Kidger. On Neural Differential Equations . PhD thesis, University of Oxford, 2021. [24] P. Kidger and C. Garcia. Equinox: neural networks in JAX via callable PyTrees and filtered transformations. Differentiable Programming workshop at Neural Information Processing Systems 2021 , 2021. [25] P. Kidger, J. Foster, X. Li, H. Oberhauser, and T. Lyons. Neural sdes as infinite-dimensional gans. In Proceedings of the 38th International Conference on Machine Learning (ICML) , pages 5541–5553, 2021. [26] D. Kim, C. Lai, W. Liao, N. Murata, Y. Takida, T. Uesaka, Y. He, Y. Mitsufuji, and S. Ermon. Consistency trajectory models: Learning probability flow ODE trajectory of diffusion. In 
+
+International Conference on Learning Representations (ICLR) , 2024. [27] D. P. Kingma and J. Ba. Adam: A method for stochastic optimization. In Y. Bengio and Y. LeCun, editors, 3rd International Conference on Learning Representations, ICLR 2015, San Diego, CA, USA, May 7-9, 2015, Conference Track Proceedings , 2015. URL http: //arxiv.org/abs/1412.6980 .12 [28] D. P. Kingma and P. Dhariwal. Glow: Generative flow with invertible 1x1 convolutions. In 
+
+Advances in Neural Information Processing Systems (NeurIPS) , volume 31, pages 10215–10224, 2018. [29] D. P. Kingma and M. Welling. Auto-encoding variational bayes. In Y. Bengio and Y. LeCun, editors, 2nd International Conference on Learning Representations, ICLR 2014, Banff, AB, Canada, April 14-16, 2014, Conference Track Proceedings , 2014. URL http://arxiv.org/ abs/1312.6114 .[30] P. Kloeden and E. Platen. Numerical Solution of Stochastic Differential Equations . Stochastic Modelling and Applied Probability. Springer Berlin Heidelberg, 2011. ISBN 9783540540625. URL https://books.google.co.uk/books?id=BCvtssom1CMC .[31] R. G. Krishnan, U. Shalit, and D. Sontag. Structured inference networks for nonlinear state space models. In Proceedings of the Thirty-First AAAI Conference on Artificial Intelligence ,AAAI’17, page 2101–2109. AAAI Press, 2017. [32] H. Kunita. Stochastic Flows and Stochastic Differential Equations . Cambridge Studies in Advanced Mathematics. Cambridge University Press, 1990. ISBN 9780521599252. URL 
+
+https://books.google.co.uk/books?id=_S1RiCosqbMC .[33] X. Li, T. Wong, R. T. Q. Chen, and D. Duvenaud. Scalable gradients for stochastic differential equations. In Proceedings of the 23rd International Conference on Artificial Intelligence and Statistics (AISTATS) , 2020. [34] Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le. Flow matching for generative modeling. In International Conference on Learning Representations (ICLR) , 2023. [35] X. Liu, C. Gong, and Q. Liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. In International Conference on Learning Representations (ICLR) , 2023. [36] E. N. Lorenz. Deterministic nonperiodic flow. Journal of Atmospheric Sci-ences , 20(2):130 – 141, 1963. doi: 10.1175/1520-0469(1963)020<0130:DNF>2.0.CO; 2. URL https://journals.ametsoc.org/view/journals/atsc/20/2/1520-0469_ 1963_020_0130_dnf_2_0_co_2.xml .[37] I. Loshchilov and F. Hutter. Decoupled weight decay regularization. In International Con-ference on Learning Representations , 2019. URL https://openreview.net/forum?id= Bkg6RiCqY7 .[38] Y. Oh, D. Lim, and S. Kim. Stable neural stochastic differential equations in analyzing irregular time series data. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=4VIgNuQ1pY .[39] B. Øksendal. Stochastic Differential Equations: An Introduction with Applications (Universi-text) . Springer, 6th edition, 2003. [40] R. Ranganath, D. Tran, and D. M. Blei. Hierarchical variational models. In Proceedings of the 33nd International Conference on Machine Learning, ICML 2016, New York City, NY, USA, June 19-24, 2016 , volume 48 of JMLR Workshop and Conference Proceedings , pages 324–333. JMLR.org, 2016. URL http://proceedings.mlr.press/v48/ranganath16.html .[41] D. Rezende and S. Mohamed. Variational inference with normalizing flows. In F. Bach and D. Blei, editors, Proceedings of the 32nd International Conference on Machine Learning ,volume 37 of Proceedings of Machine Learning Research , pages 1530–1538, Lille, France, 07–09 Jul 2015. PMLR. URL https://proceedings.mlr.press/v37/rezende15.html .[42] D. J. Rezende, S. Mohamed, and D. Wierstra. Stochastic backpropagation and approximate inference in deep generative models. In Proceedings of the 31st International Conference on International Conference on Machine Learning - Volume 32 , ICML’14, page II–1278–II–1286. JMLR.org, 2014. [43] Y. Rubanova, R. T. Q. Chen, and D. Duvenaud. Latent odes for irregularly-sampled time series. In Advances in Neural Information Processing Systems (NeurIPS) , 2019. 13 [44] T. Salimans and J. Ho. Progressive distillation for fast sampling of diffusion models. In 
+
+International Conference on Learning Representations , 2022. URL https://openreview. net/forum?id=TIdIXIpzhoI .[45] T. Salimans, D. P. Kingma, and M. Welling. Markov chain Monte Carlo and variational inference: Bridging the gap. In Proceedings of the 32nd International Conference on Machine Learning, ICML 2015, Lille, France, 6-11 July 2015 , volume 37 of JMLR Workshop and Conference Proceedings , pages 1218–1226. JMLR.org, 2015. URL http://proceedings. mlr.press/v37/salimans15.html .[46] A. Solin, E. Tamir, and P. Verma. Scalable inference in sdes by direct matching of the Fokker–Planck–Kolmogorov equation. In Advances in Neural Information Processing Systems (NeurIPS) , 2021. [47] Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon, and B. Poole. Score-based generative modeling through stochastic differential equations. In International Conference on Learning Representations (ICLR) , 2021. [48] Y. Song, P. Dhariwal, M. Chen, and I. Sutskever. Consistency models. In Proceedings of the 40th International Conference on Machine Learning (ICML) , pages 32211–32252, 2023. [49] T. Teshima, I. Ishikawa, K. Tojo, K. Oono, M. Ikeda, and M. Sugiyama. Coupling-based invertible neural networks are universal diffeomorphism approximators. In H. Larochelle, M. Ranzato, R. Hadsell, M. Balcan, and H. Lin, editors, Advances in Neural Information Processing Systems , volume 33, pages 3362–3373. Curran Associates, Inc., 2020. URL https://proceedings.neurips.cc/paper_files/paper/2020/file/ 2290a7385ed77cc5592dc2153229f082-Paper.pdf .[50] B. Tzen and M. Raginsky. Neural stochastic differential equations: Deep latent gaussian models in the diffusion limit. arXiv preprint arXiv:1905.09883 , 2019. [51] J. M. Wang, D. J. Fleet, and A. Hertzmann. Gaussian process dynamical models for human motion. IEEE Trans. Pattern Anal. Mach. Intell. , 30(2):283–298, Feb. 2008. ISSN 0162-8828. doi: 10.1109/TPAMI.2007.1167. URL https://doi.org/10.1109/TPAMI.2007.1167 .[52] C. Winkler, D. Worrall, E. Hoogeboom, and M. Welling. Learning likelihoods with conditional normalizing flows. arXiv preprint arXiv:1912.00042 , 2019. [53] L. Yang, Z. Zhang, Z. Zhang, X. Liu, M. Xu, W. Zhang, C. Meng, S. Ermon, and B. Cui. Consistency flow matching: Defining straight flows with velocity consistency, 2024. URL 
+
+https://arxiv.org/abs/2407.02398 .[54] C. Yildiz, M. Heinonen, and H. Lahdesmaki. Ode2vae: Deep generative second order odes with bayesian neural networks. In H. Wallach, H. Larochelle, A. Beygelzimer, F. d'Alché-Buc, E. Fox, and R. Garnett, editors, Advances in Neural Information Processing Systems , volume 32. Curran Associates, Inc., 2019. URL https://proceedings.neurips.cc/paper_files/ paper/2019/file/99a401435dcb65c4008d3ad22c8cdad0-Paper.pdf .[55] S. Zhai, R. ZHANG, P. Nakkiran, D. Berthelot, J. Gu, H. Zheng, T. Chen, M. Á. Bautista, N. Jaitly, and J. M. Susskind. Normalizing flows are capable generative models. In Forty-second International Conference on Machine Learning , 2025. URL https://openreview.net/ forum?id=2uheUFcFsM .14 NeurIPS Paper Checklist 
+
+1. Claims 
+
+Question: Do the main claims made in the abstract and introduction accurately reflect the paper’s contributions and scope? Answer: [Yes] Justification: The abstract and introduction state the main contributions—our neural stochas-tic flow (NSF) model, latent NSF extension, and its empirical benefits—and the experimental results in Sections 6 and Appendix E directly support these claims without exaggeration. Guidelines: • The answer NA means that the abstract and introduction do not include the claims made in the paper. • The abstract and/or introduction should clearly state the claims made, including the contributions made in the paper and important assumptions and limitations. A No or NA answer to this question will not be perceived well by the reviewers. • The claims made should match theoretical and experimental results, and reflect how much the results can be expected to generalize to other settings. • It is fine to include aspirational goals as motivation as long as it is clear that these goals are not attained by the paper. 2. Limitations 
+
+Question: Does the paper discuss the limitations of the work performed by the authors? Answer: [Yes] Justification: The current manuscript contains an explicit “Limitations” paragraph in Sec-tion 7 discussing weaknesses. Guidelines: • The answer NA means that the paper has no limitation while the answer No means that the paper has limitations, but those are not discussed in the paper. • The authors are encouraged to create a separate "Limitations" section in their paper. • The paper should point out any strong assumptions and how robust the results are to violations of these assumptions (e.g., independence assumptions, noiseless settings, model well-specification, asymptotic approximations only holding locally). The authors should reflect on how these assumptions might be violated in practice and what the implications would be. • The authors should reflect on the scope of the claims made, e.g., if the approach was only tested on a few datasets or with a few runs. In general, empirical results often depend on implicit assumptions, which should be articulated. • The authors should reflect on the factors that influence the performance of the approach. For example, a facial recognition algorithm may perform poorly when image resolution is low or images are taken in low lighting. Or a speech-to-text system might not be used reliably to provide closed captions for online lectures because it fails to handle technical jargon. • The authors should discuss the computational efficiency of the proposed algorithms and how they scale with dataset size. • If applicable, the authors should discuss possible limitations of their approach to address problems of privacy and fairness. • While the authors might fear that complete honesty about limitations might be used by reviewers as grounds for rejection, a worse outcome might be that reviewers discover limitations that aren’t acknowledged in the paper. The authors should use their best judgment and recognize that individual actions in favor of transparency play an impor-tant role in developing norms that preserve the integrity of the community. Reviewers will be specifically instructed to not penalize honesty concerning limitations. 3. Theory assumptions and proofs 
+
+Question: For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof? 15 Answer: [NA] Justification: The work presents an empirical method without formal theorems; no theoretical claims are made, so formal assumptions and proofs are not applicable. Guidelines: • The answer NA means that the paper does not include theoretical results. • All the theorems, formulas, and proofs in the paper should be numbered and cross-referenced. • All assumptions should be clearly stated or referenced in the statement of any theorems. • The proofs can either appear in the main paper or the supplemental material, but if they appear in the supplemental material, the authors are encouraged to provide a short proof sketch to provide intuition. • Inversely, any informal proof provided in the core of the paper should be complemented by formal proofs provided in appendix or supplemental material. • Theorems and Lemmas that the proof relies upon should be properly referenced. 4. Experimental result reproducibility 
+
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-perimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)? Answer: [Yes] Justification: Implementation details and full hyper -parameter are provided in Appendix E. Guidelines: • The answer NA means that the paper does not include experiments. • If the paper includes experiments, a No answer to this question will not be perceived well by the reviewers: Making the paper reproducible is important, regardless of whether the code and data are provided or not. • If the contribution is a dataset and/or model, the authors should describe the steps taken to make their results reproducible or verifiable. • Depending on the contribution, reproducibility can be accomplished in various ways. For example, if the contribution is a novel architecture, describing the architecture fully might suffice, or if the contribution is a specific model and empirical evaluation, it may be necessary to either make it possible for others to replicate the model with the same dataset, or provide access to the model. In general. releasing code and data is often one good way to accomplish this, but reproducibility can also be provided via detailed instructions for how to replicate the results, access to a hosted model (e.g., in the case of a large language model), releasing of a model checkpoint, or other means that are appropriate to the research performed. • While NeurIPS does not require releasing code, the conference does require all submis-sions to provide some reasonable avenue for reproducibility, which may depend on the nature of the contribution. For example (a) If the contribution is primarily a new algorithm, the paper should make it clear how to reproduce that algorithm. (b) If the contribution is primarily a new model architecture, the paper should describe the architecture clearly and fully. (c) If the contribution is a new model (e.g., a large language model), then there should either be a way to access this model for reproducing the results or a way to reproduce the model (e.g., with an open-source dataset or instructions for how to construct the dataset). (d) We recognize that reproducibility may be tricky in some cases, in which case authors are welcome to describe the particular way they provide for reproducibility. In the case of closed-source models, it may be that access to the model is limited in some way (e.g., to registered users), but it should be possible for other researchers to have some path to reproducing or verifying the results. 5. Open access to data and code 
+
+16 Question: Does the paper provide open access to the data and code, with sufficient instruc-tions to faithfully reproduce the main experimental results, as described in supplemental material? Answer: [No] Justification: For now, we include the related references for the sources of the datasets. We will release the code and detailed running instructions upon publication. Guidelines: • The answer NA means that paper does not include experiments requiring code. • Please see the NeurIPS code and data submission guidelines ( https://nips.cc/ public/guides/CodeSubmissionPolicy ) for more details. • While we encourage the release of code and data, we understand that this might not be possible, so “No” is an acceptable answer. Papers cannot be rejected simply for not including code, unless this is central to the contribution (e.g., for a new open-source benchmark). • The instructions should contain the exact command and environment needed to run to reproduce the results. See the NeurIPS code and data submission guidelines ( https: //nips.cc/public/guides/CodeSubmissionPolicy ) for more details. • The authors should provide instructions on data access and preparation, including how to access the raw data, preprocessed data, intermediate data, and generated data, etc. • The authors should provide scripts to reproduce all experimental results for the new proposed method and baselines. If only a subset of experiments are reproducible, they should state which ones are omitted from the script and why. • At submission time, to preserve anonymity, the authors should release anonymized versions (if applicable). • Providing as much information as possible in supplemental material (appended to the paper) is recommended, but including URLs to data and code is permitted. 6. Experimental setting/details 
+
+Question: Does the paper specify all the training and test details (e.g., data splits, hyper-parameters, how they were chosen, type of optimizer, etc.) necessary to understand the results? Answer: [Yes] Justification: Appendix E enumerate every training and evaluation hyper-parameter (learning rate, optimizer, batch size, number of epochs, etc.) for each experiment. Guidelines: • The answer NA means that the paper does not include experiments. • The experimental setting should be presented in the core of the paper to a level of detail that is necessary to appreciate the results and make sense of them. • The full details can be provided either with the code, in appendix, or as supplemental material. 7. Experiment statistical significance 
+
+Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments? Answer: [Yes] Justification: All reported metrics include standard deviation or 95% confidence inter-vals computed over five random seeds; methodology and seed information are detailed in Section 6 and Appendix E. Guidelines: • The answer NA means that the paper does not include experiments. • The authors should answer "Yes" if the results are accompanied by error bars, confi-dence intervals, or statistical significance tests, at least for the experiments that support the main claims of the paper. 17 • The factors of variability that the error bars are capturing should be clearly stated (for example, train/test split, initialization, random drawing of some parameter, or overall run with given experimental conditions). • The method for calculating the error bars should be explained (closed form formula, call to a library function, bootstrap, etc.) • The assumptions made should be given (e.g., Normally distributed errors). • It should be clear whether the error bar is the standard deviation or the standard error of the mean. • It is OK to report 1-sigma error bars, but one should state it. The authors should preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis of Normality of errors is not verified. • For asymmetric distributions, the authors should be careful not to show in tables or figures symmetric error bars that would yield results that are out of range (e.g. negative error rates). • If error bars are reported in tables or plots, The authors should explain in the text how they were calculated and reference the corresponding figures or tables in the text. 8. Experiments compute resources 
+
+Question: For each experiment, does the paper provide sufficient information on the com-puter resources (type of compute workers, memory, time of execution) needed to reproduce the experiments? Answer: [Yes] Justification: All experiments were conducted on a single NVIDIA RTX 3090 GPU (24 GB); typical training times are under few days per dataset as reported in Appendix E. Guidelines: • The answer NA means that the paper does not include experiments. • The paper should indicate the type of compute workers CPU or GPU, internal cluster, or cloud provider, including relevant memory and storage. • The paper should provide the amount of compute required for each of the individual experimental runs as well as estimate the total compute. • The paper should disclose whether the full research project required more compute than the experiments reported in the paper (e.g., preliminary or failed experiments that didn’t make it into the paper). 9. Code of ethics 
+
+Question: Does the research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?Answer: [Yes] Justification: In this paper, we introduce work designed to push the boundaries of machine learning. While our methods could carry ethical implications, we do not believe any require specific discussion at this point in the submission process. Guidelines: • The answer NA means that the authors have not reviewed the NeurIPS Code of Ethics. • If the authors answer No, they should explain the special circumstances that require a deviation from the Code of Ethics. • The authors should make sure to preserve anonymity (e.g., if there is a special consid-eration due to laws or regulations in their jurisdiction). 10. Broader impacts 
+
+Question: Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed? Answer: [Yes] Justification: A dedicated “Broader Impact Statement” section is provided near the end of the paper, outlining potential positive and negative societal impacts. 18 Guidelines: • The answer NA means that there is no societal impact of the work performed. • If the authors answer NA or No, they should explain why their work has no societal impact or why the paper does not address societal impact. • Examples of negative societal impacts include potential malicious or unintended uses (e.g., disinformation, generating fake profiles, surveillance), fairness considerations (e.g., deployment of technologies that could make decisions that unfairly impact specific groups), privacy considerations, and security considerations. • The conference expects that many papers will be foundational research and not tied to particular applications, let alone deployments. However, if there is a direct path to any negative applications, the authors should point it out. For example, it is legitimate to point out that an improvement in the quality of generative models could be used to generate deepfakes for disinformation. On the other hand, it is not needed to point out that a generic algorithm for optimizing neural networks could enable people to train models that generate Deepfakes faster. • The authors should consider possible harms that could arise when the technology is being used as intended and functioning correctly, harms that could arise when the technology is being used as intended but gives incorrect results, and harms following from (intentional or unintentional) misuse of the technology. • If there are negative societal impacts, the authors could also discuss possible mitigation strategies (e.g., gated release of models, providing defenses in addition to attacks, mechanisms for monitoring misuse, mechanisms to monitor how a system learns from feedback over time, improving the efficiency and accessibility of ML). 11. Safeguards 
+
+Question: Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse (e.g., pretrained language models, image generators, or scraped datasets)? Answer: [NA] Justification: This paper poses no such risks. Guidelines: • The answer NA means that the paper poses no such risks. • Released models that have a high risk for misuse or dual-use should be released with necessary safeguards to allow for controlled use of the model, for example by requiring that users adhere to usage guidelines or restrictions to access the model or implementing safety filters. • Datasets that have been scraped from the Internet could pose safety risks. The authors should describe how they avoided releasing unsafe images. • We recognize that providing effective safeguards is challenging, and many papers do not require this, but we encourage authors to take this into account and make a best faith effort. 12. Licenses for existing assets 
+
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected? Answer: [Yes] Justification: Whenever we use any assets, we always cite the original asset source. Guidelines: • The answer NA means that the paper does not use existing assets. • The authors should cite the original paper that produced the code package or dataset. • The authors should state which version of the asset is used and, if possible, include a URL. • The name of the license (e.g., CC-BY 4.0) should be included for each asset. 19 • For scraped data from a particular source (e.g., website), the copyright and terms of service of that source should be provided. • If assets are released, the license, copyright information, and terms of use in the package should be provided. For popular datasets, paperswithcode.com/datasets 
+
+has curated licenses for some datasets. Their licensing guide can help determine the license of a dataset. • For existing datasets that are re-packaged, both the original license and the license of the derived asset (if it has changed) should be provided. • If this information is not available online, the authors are encouraged to reach out to the asset’s creators. 13. New assets 
+
+Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets? Answer: [Yes] Justification: We fully describe our contributions and any assets used in the paper. We will also be releasing code after the publishing of the paper. Guidelines: • The answer NA means that the paper does not release new assets. • Researchers should communicate the details of the dataset/code/model as part of their submissions via structured templates. This includes details about training, license, limitations, etc. • The paper should discuss whether and how consent was obtained from people whose asset is used. • At submission time, remember to anonymize your assets (if applicable). You can either create an anonymized URL or include an anonymized zip file. 14. Crowdsourcing and research with human subjects 
+
+Question: For crowdsourcing experiments and research with human subjects, does the paper include the full text of instructions given to participants and screenshots, if applicable, as well as details about compensation (if any)? Answer: [NA] Justification: The study involves only publicly available simulation and motion - capture datasets and does not recruit human subjects or use crowdsourcing. Guidelines: • The answer NA means that the paper does not involve crowdsourcing nor research with human subjects. • Including this information in the supplemental material is fine, but if the main contribu-tion of the paper involves human subjects, then as much detail as possible should be included in the main paper. • According to the NeurIPS Code of Ethics, workers involved in data collection, curation, or other labor should be paid at least the minimum wage in the country of the data collector. 15. Institutional review board (IRB) approvals or equivalent for research with human subjects 
+
+Question: Does the paper describe potential risks incurred by study participants, whether such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) approvals (or an equivalent approval/review based on the requirements of your country or institution) were obtained? Answer: [NA] Justification: No human - subject experiments were conducted, so IRB approval is not required. Guidelines: 20 • The answer NA means that the paper does not involve crowdsourcing nor research with human subjects. • Depending on the country in which research is conducted, IRB approval (or equivalent) may be required for any human subjects research. If you obtained IRB approval, you should clearly state this in the paper. • We recognize that the procedures for this may vary significantly between institutions and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the guidelines for their institution. • For initial submissions, do not include any information that would break anonymity (if applicable), such as the institution conducting the review. 16. Declaration of LLM usage 
+
+Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does not impact the core methodology, scientific rigorousness, or originality of the research, declaration is not required. Answer: [NA] Justification: Generative LLM tools (e.g., ChatGPT, GitHub Copilot, Claude) were used solely for auxiliary tasks such as code refactoring, generating data visualization scripts, and proofreading the manuscript. These tools did not contribute to the development of the core methodology, experimental design, or interpretation of results. Guidelines: • The answer NA means that the core method development in this research does not involve LLMs as any important, original, or non-standard components. • Please refer to our LLM policy ( https://neurips.cc/Conferences/2025/LLM )for what should or should not be described. 21 Appendix Contents 
+
+A Architecture 24 
+
+A.1 Neural Stochastic Flow . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 A.2 Bridge Model . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 A.2.1 Conditioned Bijective Transformations . . . . . . . . . . . . . . . . . . . 24 
+
+B Derivation of the Flow Loss 24 
+
+B.1 One-Step to Two-Step KL Divergence . . . . . . . . . . . . . . . . . . . . . . . . 25 B.2 Two-Step to One-Step KL Divergence . . . . . . . . . . . . . . . . . . . . . . . . 26 
+
+C Detailed Description of the Learning Process 26 
+
+C.1 Neural Stochastic Flow Optimisation . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.2 Latent Neural Stochastic Flow Optimisation . . . . . . . . . . . . . . . . . . . . . 27 
+
+D Sampling and Density Evaluation 27 E Experimental Details 27 
+
+E.1 General Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 E.2 Stochastic Lorenz Attractor . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 E.2.1 Data Generation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 E.2.2 Configurations for Neural Stochastic Flows . . . . . . . . . . . . . . . . . 28 E.2.3 Configurations for Baselines . . . . . . . . . . . . . . . . . . . . . . . . . 28 E.2.4 Evaluation and Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 E.2.5 Detailed Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.3 CMU Motion Capture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.3.1 Data Preparation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.3.2 Latent SDE Reproduction . . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.3.3 SDE Matching Reproduction . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.3.4 Configurations for Latent NSF . . . . . . . . . . . . . . . . . . . . . . . . 31 E.3.5 Configurations for Baselines . . . . . . . . . . . . . . . . . . . . . . . . . 34 E.3.6 Evaluation and Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 E.3.7 Detailed Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 E.4 Stochastic Moving MNIST . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 E.4.1 Data Generation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 E.4.2 Configurations for Latent NSF . . . . . . . . . . . . . . . . . . . . . . . . 38 E.4.3 Configurations for Baseline . . . . . . . . . . . . . . . . . . . . . . . . . 38 E.4.4 Evaluation and Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39 E.4.5 Detailed Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39 
+
+F Hyperparameter Sensitivity and Ablation Studies 40 
+
+F.1 Stochastic Lorenz Attractor with Missing Data . . . . . . . . . . . . . . . . . . . . 40 22 F.1.1 Experimental Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40 F.1.2 Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 43 F.2 CMU Motion Capture Dataset with Extrapolation Task (Setup 2) . . . . . . . . . . 43 F.2.1 Experimental Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 43 F.2.2 Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 43 F.3 Practical Guidance on Hyperparameters . . . . . . . . . . . . . . . . . . . . . . . 43 F.3.1 Time Horizon for Training Htrain and Inference Hpred . . . . . . . . . . . . 43 F.3.2 Flow Loss Weight . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 43 F.3.3 Auxiliary Inner Steps or Simultaneous Updates . . . . . . . . . . . . . . . 43 F.3.4 Directional Flow Loss Components . . . . . . . . . . . . . . . . . . . . . 43 
+
+G Validation of the Fréchet Image and Video Metrics 44 
+
+G.1 Protocol . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44 G.1.1 Datasets. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44 G.1.2 Conditions. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44 G.1.3 Computation of distances. . . . . . . . . . . . . . . . . . . . . . . . . . . 44 G.2 Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44 G.3 Discussion . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46 23 A Architecture 
+
+A.1 Neural Stochastic Flow 
+
+We refer to the main text for the NSF architecture and notation (Section 3, Eqs. (5) and (6) in the main text). Here we only note implementation specifics. MLP μ and MLP σ are neural networks that share parameters and produce split outputs for the mean and variance components. Softplus activation is used for the variance component to ensure positivity. For stability, the scale heads end with a tanh multiplied by a learnt scalar to bound log-scales [ 13 ]. Exact log-densities are computed via the change-of-variables formula; see Section D. 
+
+A.2 Bridge Model 
+
+Here, we describe the architecture of the bridge model used as auxiliary variational distribution [ 1, 40 , 45 ]. The bridge model characterises the conditional distribution bξ(xt | xti , xtj ) for any intermediate time point t where ti < t < t j , given the boundary states. Combined with flow loss (Eq. (10) ) minimisation, this enables inference of intermediate states when both endpoints are known. Let cbr := ( xti , xtj , ∆t, τ, t i) denote the conditioning parameters, where τ := ( t − ti)/∆t
+
+is the normalised time and ∆t := tj − ti is the time interval, and the initial time ti is ommitted for autonomous systems. Similarly to the main NSF, we first draw a sample from a parametric Gaussian distribution: 
+
+zt = xti + τ  xtj − xti
+
+ + α(τ ) MLP μ(cbr )
+
+| {z }
+
+> μ(t)
+
++ pα(τ )∆ t Softplus  MLP σ (cbr )| {z }
+
+> σ(t)
+
+⊙ ε, (19) where ε ∼ N (0, I) is a standard normal noise vector, α(τ ) := τ (1 − τ ) is the standard Brownian-bridge factor, and MLP μ and MLP σ are neural networks that share parameters and produce split outputs for the mean and variance components. The intermediate state is then obtained by applying a flow transformation: 
+
+xt = fξ(zt, cbr ) = f L(·; cbr , ξL) ◦ f L−1(·; cbr , ξL−1) ◦ · · · ◦ f 1(zt; cbr , ξ1). (20) Note that α(τ ) vanishes at the endpoints ( τ = 0 and τ = 1 , corresponding to t = ti and t = tj ), ensuring consistency with boundary conditions. The flow transformation fξ is implemented using a series of conditioned bijective transformations, as detailed below. 
+
+A.2.1 Conditioned Bijective Transformations 
+
+Each layer of the bridge flow follows the same coupling structure as in the main NSF (Section 3). Given an input zt, we split it into two parts (zA, zB) = Split (zt) with alternating partitioning across layers, and apply the transformation: 
+
+f i(zt; cbr , ξi)= Concat 
+
+
+
+zA, zB ⊙ exp  α(τ ) MLP (i)
+
+> scale
+
+(zA, cbr , ξ(i)
+
+> scale
+
+) + α(τ ) MLP (i)
+
+> shift
+
+(zA, cbr , ξ(i)
+
+> shift
+
+)
+
+
+
+. (21) Following the main model, we apply a hyperbolic tangent function with learnt scale as the final activation of MLP (i) 
+
+> scale
+
+for training stability [ 13 ]. This construction preserves differentiability in t and guarantees the consistency at the boundary conditions ( τ = 0 , 1) where α(τ ) = 0 .
+
+# B Derivation of the Flow Loss 
+
+In our research, we utilise a bridge distribution described in Appendix A.2 as an auxiliary variational distribution [ 1 , 40 , 45 ] to constrain the upper bounds of bidirectional KL divergences between the one-step and two-step distributions of the NSF. By minimising these upper bounds, we guide the model towards satisfying the Chapman–Kolmogorov relation, as shown in Equation (4) , thereby improving its consistency with the theoretical requirements of stochastic flows of diffeomorphisms combined with architecture design. Specifically, we define Lflow as the expectation of a weighted sum of two components: 
+
+Lflow (θ, ξ) = E  
+
+> p(ti,t j,t k)
+
+[λ1-to-2 Lflow , 1-to-2(θ, ξ; ti, t j , t k) + λ2-to-1 Lflow , 2-to-1(θ, ξ; ti, t j , t k)] . (22) 24 Here, λ1-to-2 and λ2-to-1 are weighting factors, which are set to 1 in the main text, balancing the contribution of each component to the overall flow loss. The two components, Lflow , 1-to-2 and 
+
+Lflow , 2-to-1, correspond to the upper bounds of the one-step to two-step and two-step to one-step KL divergences, respectively. In our experiment, which focuses on the autonomous case, the triplet (ti, t j , t k) is sampled according to the following procedure: • The initial time ti is sampled from the data D, representing the starting times in the dataset. (For non-autonomous SDEs, it is recommended to sample ti uniformly to ensure the Chapman–Kolmogorov equation is satisfied across all time points.) • The final time tk is sampled from a mixture distribution p(tk) = 12 U(ti, t i + Htrain ) +  
+
+> 12
+
+pdata (tk | ti), where U(ti, t i + Htrain ) denotes the uniform distribution over the interval 
+
+[ti, t i + Htrain ], and pdata (tk | ti) is the conditional data distribution of end times correspond-ing to the sampled initial time ti. Here, Htrain represents the maximum one-shot interval used during training. • The intermediate time tj is uniformly sampled from the interval [ti, t k], i.e., tj ∼ U (ti, t k).The inclusion of pdata (tk | ti) in the mixture distribution for sampling tk is motivated by our obser-vation that the model achieves higher accuracy in regions where data exists. By incorporating this data-driven component, we aim to enhance the efficiency of the learning process, leveraging the model’s improved performance in data-rich areas. In the following, we derive the upper bounds of the one-step to two-step and two-step to one-step KL divergences. 
+
+B.1 One-Step to Two-Step KL Divergence 
+
+We begin with the derivation of the upper bound of the KL divergence from a one-step computation to a marginalised two-step computation. To clarify the computation, subscripts p1 
+
+> θ
+
+and p2 
+
+> θ
+
+distinguish between the distributions for 1-step sampling from xti to xtk and two-step sampling from xti to xtk
+
+via xtj , and the time arguments are omitted from the probability distributions for clarity. The key steps are outlined as follows: 
+
+DKL 
+
+
+
+p1 
+
+> θ
+
+(xtk | xti )
+
+Z
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+ dxtj
+
+
+
+(23) 
+
+=
+
+Z
+
+p1 
+
+> θ
+
+(xtk | xti ) log 
+
+"
+
+p1 
+
+> θ
+
+(xtk | xti )
+
+R p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+ dxtj
+
+#
+
+dxtk (24) 
+
+=
+
+Z
+
+p1 
+
+> θ
+
+(xtk | xti ) log 
+
+" p1 
+
+> θ
+
+(xtk | xti ) p2
+
+> θ
+
+ xtj xti , xtk
+
+
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+#
+
+dxtk (25) 
+
+=
+
+Z Z 
+
+p1 
+
+> θ
+
+(xtk | xti ) qϕ
+
+ xtj xti , xtk
+
+ "
+
+log 
+
+" p1 
+
+> θ
+
+(xtk | xti ) qϕ
+
+ xtj xti , xtk
+
+
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+#
+
+− log 
+
+" qϕ
+
+ xtj xti , xtk
+
+
+
+p2
+
+> θ
+
+ xtj xti , xtk
+
+# # 
+
+dxtj dxtk
+
+(26) 
+
+= E
+
+> p1
+> θ
+
+(xtk | xti )qϕ(xtj | xti ,xtk )
+
+"
+
+log 
+
+" p1 
+
+> θ
+
+(xtk | xti ) qϕ
+
+ xtj xti , xtk
+
+
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+#
+
+− DKL 
+
+ qϕ
+
+ xtj xti , xtk
+
+ p2
+
+> θ
+
+ xtj xti , xtk
+
+ # (27) 
+
+≤ E
+
+> p1
+> θ
+
+(xtk | xti )qϕ(xtj | xti ,xtk )
+
+"
+
+log 
+
+" p1 
+
+> θ
+
+(xtk | xti ) qϕ
+
+ xtj xti , xtk
+
+
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+## 
+
+(28) 
+
+=: Lflow , 1-to-2(θ, ϕ; ti, t j , t k). (29) 25 The equation from the second line to the third line is obtained using Bayes’ theorem and the Markov property: 
+
+Z
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+ dxtj = p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+
+
+p2
+
+> θ
+
+ xtj xti , xtk
+
+ . (30) 
+
+B.2 Two-Step to One-Step KL Divergence 
+
+Similarly, we now explore the derivation of the upper bound of the KL divergence from a marginalised two-step computation to a one-step computation. We denote this as Lflow , 2-to-1. The key steps are outlined as follows: 
+
+DKL 
+
+Z 
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+ dxtj p1 
+
+> θ
+
+(xtk | xti )
+
+
+
+(31) 
+
+=
+
+Z Z 
+
+p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+ dxtj
+
+
+
+log 
+
+" p2
+
+> θ
+
+ xtk xtj
+
+ p2
+
+> θ
+
+ xtj xti
+
+
+
+p2
+
+> θ
+
+ xtj xti , xtk
+
+ p1 
+
+> θ
+
+(xtk | xti )
+
+#
+
+dxtk (32) 
+
+=
+
+Z Z 
+
+p2
+
+> θ
+
+ xtj xti
+
+ p2
+
+> θ
+
+ xtk xtj
+
+ log 
+
+" p2
+
+> θ
+
+ xtj xti
+
+ p2
+
+> θ
+
+ xtk xtj
+
+
+
+p2
+
+> θ
+
+ xtj xti , xtk
+
+ p1 
+
+> θ
+
+(xtk | xti )
+
+#
+
+dxtj dxtk (33) 
+
+= E
+
+> p2
+> θ
+
+(xtj | xti )p2
+
+> θ
+
+(xtk | xtj )
+
+"
+
+log 
+
+" p2
+
+> θ
+
+ xtj xti
+
+ p2
+
+> θ
+
+ xtk xtj
+
+
+
+bξ
+
+ xtj xti , xtk
+
+ p1 
+
+> θ
+
+(xtk | xti )
+
+## 
+
+(34) 
+
+=: Lflow , 2-to-1(θ, ξ; ti, t j , t k). (35) From the first line to the second line, we use the relationship in Equation (30) . Although the expression inside the log in the second line appears to depend on xtj , it does not actually depend on 
+
+xtj due to this relationship. Therefore, the integrand change from the second line to the third line is justified. By minimising flow loss consists of these upper bounds, we encourage the model to satisfy the flow property in both directions simultaneously. 
+
+# C Detailed Description of the Learning Process 
+
+C.1 Neural Stochastic Flow Optimisation 
+
+The optimisation process of NSF is summarised in Algorithm 1 in the main text. Here, we provide additional implementation details. 1. Batch and time triplet sampling : We sample a batch {(xti , t i)b}Bb=1 from the dataset. For each element, we sample a triplet of time points (ti, t j , t k) where ti < t j < t k, following the strategy described in Appendix B. 2. Bridge model optimisation : Before updating the main model parameters, we perform 
+
+K inner optimisation steps on the bridge model parameters ξ. This ensures that the aux-iliary variational distribution bξ(xtj |xti , xtk ) closely approximates the model’s bridge distribution. 3. Main model optimisation : We then sample transition pairs {(xti , xtj , t i, t j )b}Bb=1 from the dataset and compute the negative log-likelihood. Combined with the flow loss, this forms the total loss used to update the main model parameters θ.This sequencing ensures that the main model is updated based on a bridge model that closely approximates the bridge distribution of the main model. Alternatively, the inner optimisation steps can be omitted and update the bridge model parameters simultaneously with the main model parameters when the main model parameters are updated. 26 C.2 Latent Neural Stochastic Flow Optimisation 
+
+The optimisation process of Latent NSF is summarised in Algorithm 1 in the main text. Here, we provide additional implementation details. 1. Observation encoding : We sample batches of observation sequences {ot0: T ,b }Bb=1 and encode them to latent states using the encoder network qϕ(xt0: T ,b |ot0: T ,b ) as defined in Eq. (15). 2. Time triplet sampling : Similar to NSF, we sample time triplets (ti, t j , t k) for each sequence, with ti < t j < t k.3. Bridge model optimisation : Before updating the main model parameters, we perform K
+
+inner optimisation steps on the bridge model parameters ξ.4. Main model optimisation : We then compute the total loss using Eq. (18) in the main text and update the NSF parameters θ, encoder parameters ϕ, and decoder parameters ψ.The specific values of hyperparameters β, βskip , and λ in the total loss (Eq. (18) in the main text) vary depending on the dataset and task, and are detailed in Appendix E. As well as NSF, the inner optimisation steps can be omitted and update the auxiliary model parameters simultaneously with the main model parameters when the main model parameters are updated. 
+
+# D Sampling and Density Evaluation 
+
+To generate a sample at time tj from a known state xti at time ti, we compute μ(xti , t i, ∆t) and 
+
+σ(xti , t i, ∆t) using the MLPs, draw ε ∼ N (0, I) and compute z = μ + σ ⊙ ε. Then, apply the flow transformation: xtj = f L ◦ f L−1 ◦ · · · ◦ f 1(z; ∆ t, t i). This enables single-step prediction without numerical integration, following the standard approach used in normalising flows. Using the change of variables formula, the log-density can be computed as: 
+
+log pθ
+
+ xtj | xti ; ti, ∆t = log p(ε) −
+
+> L
+
+X
+
+> i=1
+
+log det ∂f i
+
+∂f i−1
+
+, (36) where p(ε) is the density of the standard normal distribution. When using the affine coupling formulation, this simplifies to: 
+
+log pθ
+
+ xtj | xti ; ti, ∆t = − 12 ∥ε∥2 − d
+
+2 log 2 π −
+
+> L
+
+X
+
+> i=1
+
+X
+
+> j∈Bi
+
+∆t · MLP (i)
+
+> scale
+
+(z(i−1)  
+
+> A
+
+, t i, ∆t)j , (37) where Bi is the set of indices corresponding to the second partition in the i-th coupling layer, and 
+
+z(i−1) is the output of the (i − 1) -th layer. This density evaluation approach mirrors the standard technique in normalising flows, with appropriate conditioning on the time parameters. 
+
+# E Experimental Details 
+
+This section provides detailed information about the experimental setups, hyperparameters, archi-tectures, and computational analyses for the experiments presented in Section 6 in the main text. Implementations are available at https://github.com/nkiyohara/jax_nsf .
+
+E.1 General Setup 
+
+Unless otherwise specified, experiments were conducted with the following setup: • Frameworks: 
+
+– Our (Latent) NSF models: JAX [5] with Equinox library [24] 
+
+– PyTorch baselines: torchsde [33] 
+
+– JAX baselines: Diffrax [23] • Hardware: NVIDIA RTX 3090 GPU • Optimiser: AdamW [27, 37] • Hyperparameters: Specified below for each experiment 27 E.2 Stochastic Lorenz Attractor E.2.1 Data Generation 
+
+Following Li et al. [33], the data generation process is as follows: • SDE: dx = σ(y − x) d t + αx dW1
+
+dy = ( x(ρ − z) − y) d t + αy dW2
+
+dz = ( xy − βz ) d t + αz dW3
+
+• Parameters: σ = 10 , ρ = 28 , β = 8 /3, α = (0 .15 , 0.15 , 0.15) 
+
+• Initial states (x0, y 0, z 0): Sampled from N (0, I)
+
+• Trajectories: 1,024 for training and 1,024 for testing • Time steps: t ∈ [0 , 1] with time step size ∆t = 0 .025 (41 time steps per trajectory) 
+
+E.2.2 Configurations for Neural Stochastic Flows 
+
+• Architecture: 
+
+– State dimension d_state = 3 ; conditioning dimension d_cond = 4 (state + time) 
+
+– Gaussian parameter network: Input(d_cond) → 2×[Linear(64) → SiLU() ] →
+
+Linear(2*d_state) ; splits into ( mean , std ) with std via Softplus() 
+
+– Scale-shift networks (in conditional flow): Input(d_state/2 + d_cond) →
+
+2×[Linear(64) → SiLU() ] → Linear(d_state) ; splits into ( scale , shift in Eq. (7) in the main text) (In this case, since d_state is odd, we split three dimensions of d_state into one and two dimensions) 
+
+– Conditional flow (affine coupling; Eq. (5), (6)): 4 layers with alternating masking • Parameters: 
+
+– NSF: 25,130 
+
+– Bridge model: 26,410 • Training: 
+
+– Data conversion: Time series data is converted into pairs of states (xti , x tj ) where 
+
+tj > t i, to predict p(xtj | xti )
+
+– Epochs: 1000 
+
+– Batch size: 256 
+
+– Optimiser: AdamW [27, 37] 
+
+– Learning rate: 0.001 
+
+– Weight decay: 10 −5
+
+– Loss function: Combined negative log-likelihood and flow loss (Eq. (11)) * λ = 0 .4 (0.2 for data component, 0.2 for sampled component) * λ1-to-2 = λ2-to-1 = 1 .0
+
+– Time triplets (ti, t j , t k) for Lflow : Sampled as described in Appendix B with Htrain = 1 
+
+– Auxiliary updates: bridge model bξ trained concurrently with K = 5 inner optimisation steps per main model update 
+
+E.2.3 Configurations for Baselines 
+
+For our baseline comparisons, we utilised the official implementations of latent SDE [ 33 ], SDE matching [ 3], SDE-GAN [ 25 ], and Stable Neural SDE series [ 38 ] with minimal modifications. We maintained the original model architectures, optimiser configurations, and hyperparameter settings as provided in their respective codebases, replacing only the input data to match our experimental setting. For SDE-GAN, we found that it exhibited significant training instability when applied to the Stochastic Lorenz Attractor dataset, preventing convergence despite multiple training attempts with varying hyperparameter configurations. Therefore, we excluded SDE-GAN results from our comparison in the paper. 28 Latent SDE. The latent SDE model [33] has the following configuration: • Architecture: 
+
+– Observation dimension d_obs = 3 ; latent dimension d_latent = 4 ; hidden size 
+
+d_hidden = 128 ; sequence length T = 41 
+
+– Encoder: Input((T, d_obs)) −−−−−−−→ 
+
+> reverse in time
+
+GRU(128) → Linear(d_context) 
+
+−−−−−−−−−→ 
+
+> restore time order
+
+Output((T, d_context)) 
+
+– Posterior drift network: Input(d_latent + d_context) → 2×[Linear(128) →
+
+Softplus() ] → Linear(d_latent) 
+
+– Prior drift network: Input(d_latent) → 2×[Linear(128) → Softplus() ] →
+
+Linear(d_latent) 
+
+– Diffusion networks: per-dimension Input(1) → Linear(128) → Softplus() →
+
+Linear(1) → Sigmoid() 
+
+– Decoder: Input(d_latent) → Linear(d_obs) 
+
+• Parameters: 
+
+– Encoder: 59,328 
+
+– Posterior initial state network: 520 
+
+– Posterior drift network: 25,860 
+
+– Prior drift network: 17,668 
+
+– Diffusion networks: 1,540 
+
+– Decoder: 15 • Training: 
+
+– Iterations: 5000 
+
+– Optimiser: Adam 
+
+– Initial learning rate: 0.01 
+
+– Learning rate decay: Exponential (gamma=0.997) 
+
+– KL divergence annealing: Linear annealing from 0 to 1 over first 1000 iterations 
+
+– Numerical integration: Euler–Maruyama method with step size ∆t = 0 .01 
+
+SDE Matching. The SDE matching model [3] has the following configuration: • Architecture: 
+
+– Observation dimension d_obs = 3 ; latent dimension d_latent = 4 ; hidden size 
+
+d_hidden = 128 
+
+– Encoder: Input((T, d_obs)) → GRU(d_hidden) → Output((T+1, d_hidden)) (concatenate initial hidden with per-step outputs) 
+
+– Prior initial distribution: learnable diagonal Gaussian; parameters m, log s in 
+
+d_latent dimensions each 
+
+– Prior drift network: Input(d_latent) → Linear(d_hidden) → Softplus() →
+
+Linear(d_hidden) → Softplus() → Linear(d_latent) 
+
+– Diffusion networks: per-dimension Input(1) → Linear(d_hidden) →
+
+Softplus() → Linear(1) → Sigmoid() 
+
+– Posterior affine head: Input(d_hidden + 1) → Linear(d_hidden) → SiLU() 
+
+→ Linear(d_hidden) → SiLU() → Linear(2*d_latent) ; splits into (μt, log σt)
+
+with σt = exp(log σt)
+
+– Decoder: Input(d_latent) → Linear(d_obs) ; Gaussian likelihood with fixed std 
+
+σ = 0 .01 
+
+• Parameters: 
+
+– Prior init: 8 
+
+– Prior drift network: 17,668 
+
+– Diffusion networks: 1,540 29 – Decoder: 15 
+
+– Encoder: 99,072 
+
+– Posterior affine head: 66,560 • Training: 
+
+– Iterations: 10,000 
+
+– Batch size: 1,024 
+
+– Optimiser: Adam 
+
+– Learning rate: 0.001 
+
+Stable Neural SDE Series. The Stable Neural SDE series includes Neural LSDE, Neural GSDE, and Neural LNSDE. • Architecture (common to all variants unless specified): 
+
+– Encoder: Input(3 + 1) → Linear(64) 
+
+– Embedding network: Input(64) → Linear(64) 
+
+– Drift network: Input(64) → 2×[Linear(64) → LipSwish() ] → Linear(64) 
+
+– Diffusion network: Input(64) → 2×[Linear(64) → LipSwish() ] →
+
+Linear(64) 
+
+– Decoder: Input(64) → Linear(3) 
+
+• Parameters: 
+
+– Encoder: 256 
+
+– Embedding network: 4,160 
+
+– Drift network: 12,480 
+
+– Diffusion network: 12,480 
+
+– Decoder: 192 • Training: 
+
+– Epochs: 100 
+
+– Batch size: 16 
+
+– Optimiser: Adam 
+
+– Learning rate: 0.001 
+
+– Numerical integration: Euler–Maruyama scheme with step-size ∆t = 0 .01 
+
+E.2.4 Evaluation and Metrics KL Divergence. For computing the KL divergence, we employed non-parametric Kernel Density Estimation (KDE) with Gaussian kernels. The bandwidth parameter was determined through 3-fold cross-validation by optimising the log-likelihood on unseen data. To ensure statistical robustness, we computed the KL divergence and test log-likelihood across ten independent folds, excluding values beyond the 5th and 95th percentiles to mitigate outlier influence. The final reported metrics consist of the mean and standard deviation of these filtered values. 
+
+FLOPs. We calculated FLOPs on a per-sample basis using different methods depending on the framework. For JAX-based models like Neural Stochastic Flows, we analysed the JIT-compiled sampling function using jax.jit().lower().compile().cost_analysis()[’flops’] .For PyTorch-based models such as latent SDE and Stable Neural SDEs, we utilised 
+
+torch.utils.flop_counter.FlopCounterMode to count FLOPs during sample genera-tion, then divided by batch size. Our comparison table shows the FLOPs value for one sample. 
+
+Runtime. For all methods, we measured the wall-clock runtime for computing vectorised batches of 100 samples. 30 E.2.5 Detailed Results 
+
+Table 6 presents FLOPs comparisons across different prediction horizons. NSF requires constant FLOPs for single-step predictions regardless of time interval, while baseline methods scale linearly with the number of integration steps. Table 7 shows wall-clock runtime measurements for generating 100 samples. PyTorch implementa-tions exhibit higher runtime due to dynamic graph construction, while JAX implementations benefit from JIT compilation. NSF achieves consistent sub-millisecond runtime across all time horizons. 
+
+E.3 CMU Motion Capture E.3.1 Data Preparation 
+
+Data was prepared as follows: • Dataset: Preprocessed CMU Motion Capture (walking) from Yildiz et al. [54] • Features: 50-dimensional joint angle vectors • Sequence length: 300 time steps • Split: 16 training, 3 validation, and 4 test sequences • Setups: 
+
+– Setup 1 [33]: Train on full 300 steps, test by predicting steps 4–300 given steps 1–3 
+
+– Setup 2 [ 2]: Train on steps 1–200, test by predicting steps 101–300 given steps 1–100 
+
+E.3.2 Latent SDE Reproduction 
+
+As noted in the footnote 1 in the main text, whilst Li et al. [33] report 4.03 ± 0.20 for Setup 1, our re-implementation and other reproductions observe higher MSE values. These results are consistent with those reported in public discussions https://github.com/google-research/ torchsde/issues/112 . Our implementation is available at https://github.com/nkiyohara/ latent-sde-mocap , which is consistent with the results reported in the public discussion. 
+
+E.3.3 SDE Matching Reproduction 
+
+As noted in the footnote 2 in the main text, at the time of writing, the official implementation of SDE matching [ 3] for the CMU Motion Capture dataset has not yet been publicly released. To ensure consistent comparison across Setup 1 and Setup 2, we re-implemented SDE matching to the best of our ability based on the description in their paper. While Bartosh et al. [3] report 4.50 ± 0.32 for Setup 2, our re-implementation achieves 5.20 ± 0.43. This discrepancy may stem from implementation details not specified in the original paper, such as architectural choices, hyperparameter settings, or training procedures. We have made our best efforts obtain the smaller MSE by adjusting the hyperparameters, architecture, and training procedure. Our implementation is available at https://github.com/nkiyohara/sde-matching-mocap .
+
+E.3.4 Configurations for Latent NSF Latent NSF — Setup 1 (within-horizon forecasting). 
+
+• Architecture: 
+
+– Latent dimension d_latent = 6 ; conditioning dimension d_cond = 7 
+
+– Encoder: Input(150) → 2×[Linear(30) → Softplus() ] →
+
+Linear(2*d_latent) ; splits into ( mean , std ) with std via Softplus() 
+
+– Emission pψ (oti | xti ): Input(d_latent) → 2×[Linear(30) → Softplus() ]
+
+→ Linear(50) ; Gaussian likelihood with fixed std 
+
+– NSF transition model (latent prior): * Gaussian parameter network: Input(d_cond) → 2×[Linear(30) → SiLU() ]
+
+→ Linear(2*d_latent) ; splits into ( mean , std ) with std via Softplus() 
+
+31 Table 5: FLOPs comparison (K) for Stochastic Lorenz Attractor experiments, showing computational costs per single sample prediction. EM refers to Euler–Maruyama method, and SRK refers to Stochastic Runge–Kutta method. Method t = 0 .25 t = 0 .5 t = 0 .75 t = 1 .0
+
+Latent SDE [33] EM, ∆t = 0 .003 3,133 6,193 9,253 12,349 EM, ∆t = 0 .01 959 1,917 2,839 3,760 EM, ∆t = 0 .03 369 664 995 1,290 Milstein, ∆t = 0 .01 1,010 2,021 2,994 3,967 SRK, ∆t = 0 .01 9,253 18,838 28,054 37,270 SDE matching [3] EM, ∆t = 0 .0001 184,394 368,787 553,034 737,354 EM, ∆t = 0 .001 18,506 37,011 55,443 73,875 EM, ∆t = 0 .01 1,917 3,834 5,677 7,520 Stable Neural SDEs [38] Neural LSDE (EM, ∆t = 0 .01 ) 1,708 3,416 5,057 6,699 Neural LSDE (Milstein, ∆t = 0 .01 ) 1,708 3,416 5,057 6,699 Neural LSDE (SRK, ∆t = 0 .01 ) 16,483 33,555 49,971 66,387 Neural GSDE (EM, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural GSDE (Milstein, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural GSDE (SRK, ∆t = 0 .01 ) 18,571 37,807 56,303 74,799 Neural LNSDE (EM, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural LNSDE (Milstein, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural LNSDE (SRK, ∆t = 0 .01 ) 18,571 37,807 56,303 74,799 NSF (ours) 
+
+Htrain = 1 .0, H pred = 0 .25 53 105 156 208 
+
+Htrain = 1 .0, H pred = 0 .5 53 53 105 105 
+
+Htrain = 1 .0, H pred = 1 .0 53 53 53 53 Table 6: FLOPs comparison (K) for Stochastic Lorenz Attractor experiments, showing computational costs per single sample prediction. EM refers to Euler–Maruyama method, and SRK refers to Stochastic Runge–Kutta method. Method t = 0 .25 t = 0 .5 t = 0 .75 t = 1 .0
+
+Latent SDE (EM, ∆t = 0 .01 ) 959 1,917 2,839 3,760 Latent SDE (Milstein, ∆t = 0 .01 ) 1,010 2,021 2,994 3,967 Latent SDE (SRK, ∆t = 0 .01 ) 9,253 18,838 28,054 37,270 Neural LSDE (EM, ∆t = 0 .01 ) 1,708 3,416 5,057 6,699 Neural LSDE (Milstein, ∆t = 0 .01 ) 1,708 3,416 5,057 6,699 Neural LSDE (SRK, ∆t = 0 .01 ) 16,483 33,555 49,971 66,387 Neural GSDE (EM, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural GSDE (Milstein, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural GSDE (SRK, ∆t = 0 .01 ) 18,571 37,807 56,303 74,799 Neural LNSDE (EM, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural LNSDE (Milstein, ∆t = 0 .01 ) 1,925 3,848 5,698 7,548 Neural LNSDE (SRK, ∆t = 0 .01 ) 18,571 37,807 56,303 74,799 NSF ( Htrain = 0 .25 , H pred = 0 .25 ) 53 105 156 208 NSF ( Htrain = 0 .5, H pred = 0 .5) 53 53 105 105 NSF ( Htrain = 1 .0, H pred = 1 .0) 53 53 53 53 32 * Scale-shift network (in conditional flow): 4 layers with alternating masking, each layer: Input(d_latent/2 + d_cond) → 2×[Linear(30) → SiLU() ]
+
+→ Linear(d_latent) ; splits into ( scale , shift in Eq. (7) in the main text) 
+
+– Bridge model: * Gaussian parameter network: Input(d_cond + 1) → 2×[Linear(30) →
+
+SiLU() ] → Linear(2*d_latent) ; splits into (mean , std ) with std via 
+
+Softplus() 
+
+* Scale-shift network (in conditional flow): 4 layers with alternating masking, each layer: Input(d_latent + d_cond + 1) → 2×[Linear(30) → SiLU() ] →
+
+Linear(d_latent) ; splits into ( scale , shift in Eq. (20)) • Parameters: 
+
+– Stochastic flow: 8,454 
+
+– Bridge model: 9,504 
+
+– Decoder: 2,690 
+
+– Posterior: 5,832 • Training: 
+
+– Objective: maximise Eq. (18) 
+
+– Steps: 100,000 
+
+– Batch size: 128 
+
+– Optimiser: AdamW 
+
+– Learning rate: 0.001 
+
+– Hyperparameters: β = 0 .1, λ = 1 .0, βskip = 0 .1
+
+– Skip-ahead KL: prediction horizons up to 3 time steps; 10 samples per skip 
+
+Latent NSF — Setup 2 (extrapolation). 
+
+• Architecture: 
+
+– Latent dimension d_latent = 6 , conditioning dimension d_cond = 7 
+
+– Encoder: Input((T, 50)) → GRU(32) → 2×[Linear(32) → Softplus() ] →
+
+Linear(2*d_latent) ; splits into ( mean , std ) with std via Softplus() 
+
+– Emission pψ (oti | xti ): Input(d_latent) → 2×[Linear(30) → Softplus() ]
+
+→ Linear(50) ; Gaussian likelihood with trainable std 
+
+– NSF transition model (latent prior): * Gaussian parameter network: Input(d_cond) → 2×[Linear(64) → SiLU() ]
+
+→ Linear(2*d_latent) ; splits into ( mean , std ) with std via Softplus() 
+
+* Scale-shift network (in conditional flow): 4 layers with alternating masking, each layer: Input(d_latent/2 + d_cond) → 2×[Linear(64) → SiLU() ]
+
+→ Linear(d_latent) ; splits into ( scale , shift )
+
+– Bridge model: * Gaussian parameter network: Input(d_cond + 1) → 2×[Linear(32) →
+
+SiLU() ] → Linear(2*d_latent) ; splits into (mean , std ) with std via 
+
+Softplus() 
+
+* Scale-shift network (in conditional flow): 4 layers with alternating masking, each layer: Input(d_latent/2 + d_cond + 1) → 2×[Linear(32) → SiLU() ] →
+
+Linear(d_latent) ; splits into ( scale , shift )• Parameters: 
+
+– Stochastic flow: 28,820 
+
+– Bridge model: 10,452 
+
+– Decoder: 4,240 
+
+– Posterior: 10,604 • Training: 
+
+– Objective: maximise Eq. (18) 33 – Steps: 100,000 
+
+– Batch size: 64 
+
+– Optimiser: AdamW 
+
+– Learning rate: 0.001 
+
+– Hyperparameters: β = 0 .3, λ = 1 .0, βskip = 0 .3
+
+– Warm-up: β and flow loss weight are linearly increased over the first 2,000 steps 
+
+– Time horizon for flow loss: Htrain = 20 
+
+– Auxiliary updates: K = 3 inner steps per training iteration for the bridge model 
+
+– Skip-ahead KL: prediction horizons up to τ = 10 time steps; 10 samples per skip 
+
+E.3.5 Configurations for Baselines Latent SDE — Setup 1 (within-horizon forecasting). 
+
+• Architecture: 
+
+– Observation dimension d_obs = 50 ; latent dimension d_latent = 6 ; context di-mension d_context = 3 
+
+– Encoder: Input(150) → 2×[Linear(30) → Softplus() ] → Linear(15) ; splits into (mean , std , context ) with std via exp() , with 6, 6, and 3 dimensions respec-tively 
+
+– Posterior drift network: Input(d_latent + 1 + d_context) → Linear(30) →
+
+Softplus() → Linear(d_latent) 
+
+– Prior drift network: Input(d_latent + 1) → Linear(30) → Softplus() →
+
+Linear(d_latent) 
+
+– Diffusion networks: per-latent Input(2) → Linear(30) → Softplus() →
+
+Linear(1) → Sigmoid() 
+
+– Decoder: Input(d_latent) → Linear(30) → Softplus() → Linear(30) →
+
+Softplus() → Linear(2*d_obs) 
+
+• Parameters: 
+
+– Encoder: 5,925 
+
+– Decoder: 4,240 
+
+– Posterior drift network: 516 
+
+– Prior drift network: 426 
+
+– Diffusion networks: 726 • Training: 
+
+– Iterations: 5,000 
+
+– Optimiser: Adam 
+
+– Learning rate: 0.01 with exponential decay γ = 0 .999 at every step 
+
+– KL annealing: linear over the first 400 iterations 
+
+– Numerical integration: Euler–Maruyama with step size ∆t = 0 .02 
+
+Latent SDE — Setup 2 (extrapolation). 
+
+• Architecture: 
+
+– Observation dimension d_obs = 50 ; latent dimension d_latent = 10 ; context di-mension d_context = 3 
+
+– Encoder: Input((T, 50)) → ODE-GRU(30) ; linear heads: Input(30) →
+
+Linear(3) and Input(30) → Linear(20) ; splits into (mean , std ) with std via 
+
+exp() 
+
+– Posterior drift network: autonomous Input(d_latent + d_context) →
+
+Linear(30) → Softplus() → Linear(d_latent) 
+
+– Prior drift network: Input(d_latent) → Linear(30) → Softplus() →
+
+Linear(d_latent) 
+
+34 – Diffusion networks: per-latent Input(1) → Linear(30) → Softplus() →
+
+Linear(1) → Sigmoid() 
+
+– Decoder: Input(d_latent) → Linear(30) → Softplus() → Linear(30) →
+
+Softplus() → Linear(2*d_obs) 
+
+• Parameters: 
+
+– Encoder: 12,027 
+
+– Decoder: 4,360 
+
+– Posterior drift network: 730 
+
+– Prior drift network: 640 
+
+– Diffusion networks: 910 • Training: 
+
+– Iterations: 5,000 
+
+– Optimiser: Adam 
+
+– Learning rate: 0.01 with exponential decay γ = 0 .9 every 500 iterations 
+
+– KL annealing: Linear over the first 500 iterations 
+
+– Numerical integration: Euler–Maruyama with step size ∆t = 0 .05 
+
+SDE Matching – Setup 1 (within-horizon forecasting). 
+
+• Architecture: 
+
+– Observation dimension d_obs = 50 ; latent dimension d_latent = 6 ; posterior hid-den size d_hidden = 100 
+
+– Encoder: Input((T, d_obs)) −−−−−−−→ 
+
+> reverse in time
+
+GRU(d_hidden) −−−−−−−−−→
+
+> restore time order
+
+Output((T+1, d_hidden)) (concatenate initial hidden with per-step outputs) 
+
+– Posterior affine head: Input(d_hidden + 1) → Linear(d_hidden) → SiLU() →
+
+Linear(d_hidden) → SiLU() → Linear(2*d_latent) ; splits into (μt, σ t) with 
+
+σt = Softplus (·); time-weighted aggregation over encoder outputs enabled 
+
+– Prior initial distribution: learnable diagonal Gaussian; parameters m, log s in Rd_latent 
+
+– Prior drift network (autonomous): Input(d_latent) → Linear(30) →
+
+Softplus() → Linear(d_latent) 
+
+– Diffusion networks (diagonal, per-latent): Input(1) → Linear(30) → Softplus() 
+
+→ Linear(1) → Sigmoid() 
+
+– Decoder (observation model): Input(d_latent) → 2×[Linear(30) →
+
+Softplus() ] → Linear(d_obs) ; Gaussian likelihood with fixed std ( σ0=1 .0, floor 
+
+10 −3)• Parameters: 
+
+– Prior SDE: 942 
+
+– Prior Observation: 2,740 
+
+– Posterior Encoder: 45,400 
+
+– Posterior Affine: 21,513 • Training: 
+
+– Iterations: 2,000 
+
+– Optimiser: AdamW 
+
+– Learning rate: 0.01 with exponential decay γ = 0 .999 per step 
+
+– KL weight: 1.0
+
+– Training sequence length: sampled from U{ 3, 100 }
+
+SDE Matching – Setup 2 (extrapolation). 
+
+• Architecture: 
+
+– Observation dimension d_obs = 50 ; latent dimension d_latent = 10 ; posterior hidden size d_hidden = 1000 ; prior SDE: autonomous 35 – Encoder: Input((T, d_obs)) −−−−−−−→ 
+
+> reverse in time
+
+GRU(d_hidden) −−−−−−−−−→
+
+> restore time order
+
+Output((T+1, d_hidden)) 
+
+– Posterior affine head: Input(d_hidden) → Linear(d_hidden) → SiLU() →
+
+Linear(d_hidden) → SiLU() → Linear(2*d_latent) ; splits into (μt, σ t) with 
+
+σt = Softplus (·); time-weighted encoder aggregation enabled; no explicit time input 
+
+– Prior initial distribution: learnable diagonal Gaussian in Rd_latent 
+
+– Prior drift network (autonomous): Input(d_latent) → Linear(30) →
+
+Softplus() → Linear(d_latent) 
+
+– Diffusion networks (diagonal, per-latent): Input(1) → Linear(30) → Softplus() 
+
+→ Linear(1) → Sigmoid() 
+
+– Decoder (observation model): Input(d_latent) → 2×[Linear(30) →
+
+Softplus() ] → Linear(d_obs) ; Gaussian likelihood with fixed std ( σ0=1 .0, floor 
+
+10 −3)• Parameters: 
+
+– Prior SDE: 1,550 
+
+– Prior Observation: 2,860 
+
+– Posterior Encoder: 3,154,000 
+
+– Posterior Affine: 2,022,021 • Training: 
+
+– Iterations: 100 ,000 
+
+– Optimiser: AdamW 
+
+– Learning rate: 0.0001 
+
+– KL weight: 1.0
+
+– Sequence lengths: train=200, test=300; 
+
+– Evaluation: Euler–Maruyama integration with fixed step ∆t = 0 .01 
+
+E.3.6 Evaluation and Metrics 
+
+We report the mean squared error (MSE) between the predicted mean trajectory and the ground truth joint angles over the forecast horizon (steps 4–300 for Setup 1, 101–300 for Setup 2). Results in Table 3 are averaged over 10 runs with different random seeds, reporting mean ± 95% t-confidence intervals where available from original papers or our runs. 
+
+E.3.7 Detailed Results 
+
+Table 8 provides FLOPs and runtime comparisons. Despite comparable computational complexity (FLOPs), Latent NSF achieves significantly faster runtime due to its ability to predict states at arbitrary time points in parallel, unlike traditional SDE methods that require sequential time-stepping. 
+
+E.4 Stochastic Moving MNIST E.4.1 Data Generation 
+
+Data generation for Stochastic Moving MNIST was as follows: • Frame size: 64x64 pixels • Sequence length: 25 steps • Digits: Two MNIST digits, chosen randomly • Initial conditions: Positions and velocities sampled uniformly at random • Bouncing mechanism: Modified from Denton and Fergus [11] for perfect reflection off boundaries with small angular noise N (0 , σ 2
+
+> bounce
+
+), where σbounce = 0 .1 rad • Dataset size: 
+
+– Training: 60,000 sequences (using original MNIST training set) 
+
+– Test: 10,000 sequences (using MNIST test set) 36 Table 7: Runtime comparison (ms) for Stochastic Lorenz Attractor experiments. All measurements are mean times for generating a batch of 100 vectorised samples (10 trials). EM refers to Euler– Maruyama method, and SRK refers to Stochastic Runge–Kutta method. Method Framework t = 0 .25 t = 0 .5 t = 0 .75 t = 1 .0
+
+Latent SDE (EM, ∆t = 0 .01 ) PyTorch 141.7 281.8 417.8 1,988.3 Latent SDE (EM, ∆t = 0 .01 ) JAX 123.5 130.7 150.6 147.8 Latent SDE (Milstein, ∆t = 0 .01 ) PyTorch 493.4 951.2 1,449.9 3,294.2 Latent SDE (Milstein, ∆t = 0 .01 ) JAX 142.7 149.4 181.4 188.7 Latent SDE (SRK, ∆t = 0 .01 ) PyTorch 1,084.5 2,189.0 3,283.9 5,827.9 Neural LSDE (EM, ∆t = 0 .01 ) PyTorch 101.0 198.9 291.6 1,632.7 Neural LSDE (Milstein, ∆t = 0 .01 ) PyTorch 158.4 250.9 396.1 1,767.9 Neural LSDE (SRK, ∆t = 0 .01 ) PyTorch 886.5 1,799.9 2,681.0 4,807.4 Neural GSDE (EM, ∆t = 0 .01 ) PyTorch 107.6 215.4 316.9 1,662.3 Neural GSDE (Milstein, ∆t = 0 .01 ) PyTorch 137.7 274.9 431.9 1,852.9 Neural GSDE (SRK, ∆t = 0 .01 ) PyTorch 964.2 1,962.1 2,925.3 5,155.3 Neural LNSDE (EM, ∆t = 0 .01 ) PyTorch 104.7 209.7 310.9 1,644.0 Neural LNSDE (Milstein, ∆t = 0 .01 ) PyTorch 130.8 290.7 381.9 1,779.1 Neural LNSDE (SRK, ∆t = 0 .01 ) PyTorch 950.0 1,921.4 2,853.7 5,023.7 NSF ( Hpred = 0 .25 ) JAX 0.221 0.303 0.341 0.373 NSF ( Hpred = 0 .5) JAX 0.229 0.287 0.332 0.310 NSF ( Hpred = 1 .0) JAX 0.255 0.286 0.294 0.295 Table 8: FLOPs, runtime, and MSE comparison for CMU Motion Capture experiments. FLOPs are measured per sample (latent SDE uses Euler–Maruyama integration), while runtime measurements represent the time required to generate a batch of 100 vectorised samples.                                                                                                                                                                                 
+
+> Method Framework FLOPs (M) Runtime (ms) MSE Setup 1 Setup 2 Setup 1 Setup 2 Setup 1 Setup 2 Latent SDE ( ∆t= 0 .005 )JAX 13.5 25.1 3,585.0 3,236.0 ––Latent SDE ( ∆t= 0 .005 )PyTorch 13.5 25.1 10,254.9 17,039.7 13.0 10.2 Latent SDE ( ∆t= 0 .01 )JAX 8.0 17.8 1,894.0 1,664.0 ––Latent SDE ( ∆t= 0 .01 )PyTorch 8.0 17.8 5,338.7 8,594.0 12.9 10.1 Latent SDE ( ∆t= 0 .02 )JAX 5.2 14.1 854.2 909.6 ––Latent SDE ( ∆t= 0 .02 )PyTorch 5.2 14.1 2,663.2 4,455.8 13.0 10.1 Latent SDE ( ∆t= 0 .05 )JAX 3.6 11.9 374.1 494.2 ––Latent SDE ( ∆t= 0 .05 )PyTorch 3.6 11.9 1,201.2 2,028.2 12.8 10.2 Latent SDE ( ∆t= 0 .1)JAX 3.0 11.2 223.0 372.6 ––Latent SDE ( ∆t= 0 .1)PyTorch 3.0 11.2 595.1 1,155.9 12.9 9.7 Latent SDE ( ∆t= 0 .2)JAX 2.7 10.8 148.4 323.3 ––Latent SDE ( ∆t= 0 .2)PyTorch 2.7 10.8 279.6 764.6 12.9 10.6 Latent SDE ( ∆t= 0 .5)JAX 2.6 10.6 107.1 289.6 ––Latent SDE ( ∆t= 0 .5)PyTorch 2.6 10.6 136.3 584.4 12.8 31.3 Latent SDE ( ∆t= 1 )JAX 2.5 10.5 99.88 279.6 ––Latent SDE ( ∆t= 1 )PyTorch 2.5 10.5 95.4 522.9 13.3 281.3 Latent SDE ( ∆t= 2 )JAX 2.5 10.5 92.19 266.1 ––Latent SDE ( ∆t= 2 )PyTorch 2.5 10.5 77.9 492.7 19.9 –Latent SDE ( ∆t= 5 )JAX 2.5 10.5 89.13 269.7 ––Latent SDE ( ∆t= 5 )PyTorch 2.5 10.5 64.4 474.6 362.1 –Latent NSF (ours) JAX 6.0 17.7 0.44 1.8 8.7 3.4
+
+37 E.4.2 Configurations for Latent NSF 
+
+• Architecture: 
+
+– Latent dimension d_latent = 10 ; per-frame embedding dimension d_embed = 64 ;scene dimension d_scene = 64 
+
+– Per-frame encoder (CNN, 64 ×64 → 4×4): 4 down blocks: Conv2d(3*3, stride=1, padding=1) → MaxPool2d(2,2) → GroupNorm(8) → SiLU() ; chan-nels: 1→64 →128 →256 →256 ; spatial: 64 →32 →16 →8→4; head: Flatten() →
+
+Linear(d_embed) 
+
+– Posterior (inference network): Input(d_embed) → GRU(128) ; head: Input(128) 
+
+→ Linear(128) → SiLU() → Linear(2*d_latent) ; splits into ( mean , std ) with std via Softplus() 
+
+– Scene encoder: temporal median pooling over per-frame embeddings; 
+
+Input(d_embed) → Linear(128) → SiLU() → Linear(d_scene) 
+
+– Emission: inputs [scene, x_t] with size d_scene + d_latent ; MLP() 
+
+→ Linear(4*4*4*d_embed) ; reshape to (4*d_embed, 4, 4) ; 4 up blocks: 
+
+Conv(3*3) → GroupNorm(8) → upsample(*2) → SiLU() , channels: 4*d_embed →
+
+4*d_embed → 2*d_embed → d_embed ; spatial: 4 → 8 → 16 → 32 ; then Conv(3*3) 
+
+→ SiLU() → Conv(3*3) → Sigmoid() ; output size C=1, H=W=64 ; Gaussian likeli-hood with uniform trainable std (shared across pixels) 
+
+– NSF transition model (latent prior): * Gaussian base: Input() → 2×[Linear(64) → SiLU() ] →
+
+Linear(2*d_latent) ; splits into ( mean , std ) with std via Softplus() 
+
+* Affine coupling flow: 4 layers with alternating masking (autonomous SDE) * Per-layer conditioner: Input(d_latent/2) → 2×[Linear(64) → SiLU() ] →
+
+Linear(d_latent) ; splits into ( scale , shift )
+
+– Bridge model: * Gaussian base: Input() → 2×[Linear(64) → SiLU() ] →
+
+Linear(2*d_latent) ; splits into ( mean , std ) with std via Softplus() 
+
+* Affine coupling flow: 4 layers with alternating masking * Per-layer conditioner: Input(d_latent) → 2×[Linear(64) → SiLU() ] →
+
+Linear(d_latent) 
+
+• Parameters: 
+
+– Encoder: 1,223,360 
+
+– Decoder: 1,341,570 
+
+– Posterior: 110,228 
+
+– Scene encoder: 33,088 
+
+– NSF prior: 33,740 
+
+– Bridge model: 37,260 • Training: 
+
+– Epochs: 1,000 
+
+– Batch size: 64 
+
+– Learning rate: 0.001 
+
+– Latent NSF objective parameters: β = 30 .0, λ = 0 .1, βskip = 30 .0, Htrain = 2 .5
+
+– Warm-up: β, βskip , and flow loss weight linearly increased over the first 20 epochs 
+
+– Auxiliary updates: K = 3 inner steps per iteration for the bridge model 
+
+– Skip-ahead KL: up to 25-step horizons; 25 samples per skip 
+
+E.4.3 Configurations for Baseline Latent SDE We used an implementation based on Daems et al. [10] . The baseline latent SDE model characteristics are as follows: • Architecture: 38 – Latent dimension d_latent = 10 ; per-frame embedding dimension d_embed = 64 ;content dimension d_contents = 64 
+
+– Prior drift network: Input(d_latent) → Linear(200) → Tanh() →
+
+Linear(200) → Tanh() → Linear(d_latent) 
+
+– Diffusion networks (per-latent): Input(1) → Linear(200) → Tanh() →
+
+Linear(200) → Tanh() → Linear(1) → Softplus() 
+
+– Posterior control network: inputs [x, y, h(t)] ; Input(2*d_latent + d_embed) 
+
+→ Linear(200) → Tanh() → Linear(200) → Tanh() → Linear(d_latent) ;last layer kernel initialised to zero 
+
+– Encoder (2D conv, frames 64*64*1 ): four down blocks: Conv(3*3) 
+
+→ MaxPool(2) → GroupNorm(8) → SiLU() ; channels 1 → d_embed →
+
+2*d_embed → 4*d_embed → 4*d_embed ; spatial 64 → 32 → 16 → 8 → 4;head: Flatten() → Linear(d_embed) per frame 
+
+– Content extractor: temporal median pooling over per-frame embeddings; 
+
+Input(d_embed) → Linear(d_embed) → SiLU() → Linear(d_contents) ; out-puts w
+
+– Inference network for x_0 : temporal Conv(3) → SiLU() → Conv(3) ; then MLP() 
+
+on concatenated features to output 2*d_latent (mean and log-variance) 
+
+– Decoder: inputs [w, x_t] with size d_contents + d_latent ; MLP() →
+
+Linear(4*4*4*d_embed) ; reshape to (4, 4, 4*d_embed) ; 4 up blocks: 
+
+Conv(3*3) → GroupNorm(8) → upsample(*2) → SiLU() , with channels 
+
+4*d_embed → 4*d_embed → 2*d_embed → d_embed ; spatial 4 → 8 → 16 
+
+→ 32 ; then Conv(3*3) → SiLU() → Conv(3*3) → Sigmoid() ; output size C=1, H=W=64 
+
+• Parameters: 
+
+– Encoder: 1,269,972 
+
+– Scene encoder: 8,320 
+
+– Decoder: 1,341,569 
+
+– Prior drift network: 44,410 
+
+– Posterior drift network: 59,210 
+
+– Diffusion network: 408,010 • Training: 
+
+– Epochs: 100 
+
+– Batch size: 32 
+
+– Optimiser: Adam 
+
+– Learning rate: 0.0003 
+
+– KL weight: 0.1 
+
+– Numerical integration: Stratonovich–Milstein with step size equal to one third of the observation interval 
+
+E.4.4 Evaluation and Metrics 
+
+Evaluation was performed using Fréchet distances with embeddings from the pre-trained SRVP model [14] (using publicly available weights). The computed metrics are: • Static FD: Based on time-averaged frame embeddings • Dynamics FD: Based on sequence-level dynamics embeddings • Frame-wise FD: Averaged per-frame embedding distances Validation of these metrics is provided in Appendix G. 
+
+E.4.5 Detailed Results 
+
+Table 9 provides computational comparisons for the Stochastic Moving MNIST experiments. Beyond the quantitative metrics reported in the main text, we provide qualitative visualisations to demonstrate 39 the reconstruction and prediction quality of our Latent NSF model compared to the latent SDE baseline. Figure 6 shows a direct comparison of reconstruction quality between latent SDE and Latent NSF on input sequences. Both models are tasked with encoding and then reconstructing the same 25-frame input sequences. The figure demonstrates that Latent NSF achieves comparable reconstruction quality while maintaining computational efficiency. For predictive performance, Figure 7 illustrates the models’ ability to forecast future frames given the first 25 frames of a sequence. The ground truth trajectory (top row) shows the natural bouncing dynamics of the two MNIST digits. The latent SDE predictions (middle row) and Latent NSF recursive predictions (bottom row) both capture the general trajectory and bouncing behaviour, though with different levels of visual fidelity and temporal consistency. Finally, Figure 8 provides a focused comparison at a specific prediction horizon (20 steps into the future) by showing multiple predicted samples from each model. This visualisation allows for assessment of both the accuracy of individual predictions and the diversity of the stochastic predictions across different model variants. 
+
+# F Hyperparameter Sensitivity and Ablation Studies 
+
+To validate the sensitivity of the hyperparameters and effectiveness of the flow loss, we conduct an ablation study on the Stochastic Lorenz Attractor with missing data (Section F.1), and CMU Motion Capture dataset with extrapolation task (Setup 2) (Section F.2). 
+
+F.1 Stochastic Lorenz Attractor with Missing Data 
+
+We trained on Stochastic Lorenz Attractor data where only a random continuous segment of length 0.5 from the full trajectory t ∈ [0 , 1] was observed. 
+
+F.1.1 Experimental Setup 
+
+We modify the training protocol as follows: • Original data structure : The complete dataset contains trajectories with 41 time points at 
+
+t ∈ { 0, 0.025 , 0.05 , . . . , 0.975 , 1.0}, sampled at regular intervals of ∆t = 0 .025 .• Missing data protocol : We only use random continuous segment of length 20 time steps from the training data. • Training pairs : From the 20 time points, we construct all possible state transition pairs 
+
+(xti , x tj ) where ti < t j . This yields 20 × 19 /2 = 190 unique pairs per trajectory, compared to 820 pairs in the complete data setting. Crucially, no training pairs directly connect states across > 20 time steps. • Training conditions : All other hyperparameters remain identical to Section E.2.2: 
+
+– Epochs: 1000 
+
+– Optimiser: AdamW with learning rate 0.001 and weight decay 10 −5
+
+– Batch size: 256 
+
+– Inner steps for auxiliary model: K = 5 inner optimisation steps 
+
+– Flow loss weights: λ = 0 .4
+
+– Flow loss balancing: λ1-to-2 = λ2-to-1 = 1 .0
+
+• Evaluation : We compute KL divergence between the model and true distributions at 
+
+t ∈ { 0.5, 1.0} using kernel density estimation as described in Section E.2.4. Results are averaged over 5 random seeds. Based on this baseline condition, we conducted experiments varying the inner steps K, flow loss weight λ, and directional flow loss components λ1-to-2 and λ2-to-1.40 Table 9: FLOPs and runtime comparison for Stochastic Moving MNIST experiments, showing computational costs for encoding 25 input frames and predicting the subsequent 25 frames. Runtime measurements represent the time required to process a batch of 100 vectorised samples. SM: Stratonovich–Milstein solver. Method Framework FLOPs (M) Runtime (ms) Latent SDE (SM) JAX 20,264 750 Latent NSF (recursive) JAX 20,276 338 Latent NSF (one-step) JAX 20,277 358 
+
+Figure 6: Reconstruction quality comparison on Stochastic Moving MNIST. Top row: original input frames, middle row: latent SDE reconstructions, bottom row: Latent NSF (recursive) reconstructions. Each column shows consecutive time steps (frames 1–25). Both models successfully capture the appearance and positioning of the bouncing digits. 
+
+Figure 7: Future frame prediction comparison on Stochastic Moving MNIST. Top: ground truth continuation, middle: latent SDE predictions, bottom: Latent NSF predictions. Both models predict 25 future frames given the first 25 frames. The comparison shows how well each model captures stochastic bouncing dynamics while maintaining visual quality and temporal coherence.    
+
+> (a) Ground truth (b) Latent SDE (c) Latent NSF (one-step) (d) Latent NSF (recursive)
+
+Figure 8: Stochastic prediction samples 20 steps into the future on Stochastic Moving MNIST. Each panel shows multiple independent samples generated after observing the first 25 frames and predicting 20 steps ahead. 41 (a) Ground truth (b) λ = 0 .0 (c) λ = 0 .2 (d) λ = 0 .8
+
+Figure 9: Comparison of generated samples (64 samples per panel) on the stochastic Lorenz attractor. Columns show ground truth and model samples with different flow loss weights λ ∈ { 0.0, 0.2, 0.8}.Table 10: Flow loss ablation on missing Stochastic Lorenz. Reported values are mean ± standard deviation over seeds. Flow loss weight (λ) KL ( t = 0 .5) KL ( t = 1 .0)0.0 (no flow loss) 7.9 ± 0.2 22 .9 ± 1.8
+
+0.001 3.0 ± 0.2 4.5 ± 0.9
+
+0.01 1.7 ± 0.1 2.1 ± 0.6
+
+0.4 (default) 1.2 ± 0.1 1.2 ± 1.0
+
+0.8 1.3 ± 0.2 1.3 ± 0.6
+
+Table 11: Effect of auxiliary optimisation steps K on KL and training time (per epoch). λ = 0 .4.Simultaneous: auxiliary and main models updated jointly without inner loops, as described in Appendix C.1. K (auxiliary inner steps) KL ( t = 0 .5) KL ( t = 1 .0) Epoch time (s) 0 (no auxiliary steps) 7.9 ± 0.2 22 .9 ± 1.8 66 0 (simultaneous) 1.1 ± 0.1 1.8 ± 1.2 106 1 1.1 ± 0.1 1.7 ± 0.6 125 5 (default) 1.2 ± 0.1 1.4 ± 0.6 201 10 1.1 ± 0.2 1.2 ± 0.7 295 Table 12: Effect of directional flow loss components on KL. λ = 0 .4, K = 5 .Flow loss direction KL ( t = 0 .5) KL ( t = 1 .0)1-to-2 only λ1-to-2 = 1 , λ 2-to-1 = 0 1.1 ± 0.1 1.4 ± 0.6
+
+2-to-1 only λ1-to-2 = 0 , λ 2-to-1 = 1 1.2 ± 0.1 1.4 ± 0.7
+
+Bidirectional λ1-to-2 = λ2-to-1 = 1 1.2 ± 0.1 1.4 ± 0.6
+
+42 F.1.2 Results 
+
+Flow loss weight sensitivity is summarised in Table 10, and visualisation of 64 trajectories for the ground truth and generated samples is shown in Figure 9, which is obtained in the same way as Figure 3 in the main text with one-step prediction. The effect of auxiliary inner steps is shown in Table 11. Directional components are compared in Table 12. Overall, the sensitivity to the flow loss weight and the number of inner steps is low when the order of magnitude is around the baseline conditions. 
+
+F.2 CMU Motion Capture Dataset with Extrapolation Task (Setup 2) F.2.1 Experimental Setup 
+
+We use the same experimental setup as Setup 2 in Section E.3.4, and conducted the parametric study varying the inner steps K, flow loss weight λ, and directional flow loss components λ1-to-2 and λ2-to-1
+
+on the CMU Motion Capture dataset with extrapolation task (Setup 2). 
+
+F.2.2 Results 
+
+Flow loss weight (bidirectional, K = 3 ) is reported in Table 13. Directional variants for flow loss at 
+
+λ = 1 .0, K = 3 are summarised in Table 14. The number of inner steps for the auxiliary model (with 
+
+λ = 1 .0, bidirectional) are shown in Table 15. In short, best MSE occurs near λ = 0 .03 , direction 2-to-1 is slightly better than 1-to-2 but bidirectional is comparable, and small K (e.g., 1) also works while K = 0 fails, which means that, in this case, the sensitivity to the flow loss weight and the number of inner steps is low when the order of magnitude is around the baseline conditions. 
+
+F.3 Practical Guidance on Hyperparameters 
+
+We provide practical guidance on hyperparameters specifically for the NSF or Latent NSF. 
+
+F.3.1 Time Horizon for Training Htrain and Inference Hpred 
+
+The time horizon for training should be set to the maximum one-shot interval used during training. In our experiments, we found that there is no significant difference in performance dependent on the 
+
+Hpred value. However we have not explored the effect of the Htrain value. Since, in practice, large 
+
+Htrain requires more expressive model capacity, we recommend balancing trade-off between model capacity and prediction runtime using Htrain , and using Hpred = Htrain in most cases, depending on the data complexity and prediction runtime requirements. 
+
+F.3.2 Flow Loss Weight 
+
+For any experiment we have conducted, we found that sub-order of magnitude λ values are sufficient to achieve good performance, assuming the data is normalised. 
+
+F.3.3 Auxiliary Inner Steps or Simultaneous Updates 
+
+The auxiliary inner steps K controls the number of inner steps for the auxiliary model. We recommend using simultaneous updates first, as described in Appendix C.2, and if there is training instability, we recommend using K > 0 and increasing the value of K until the flow loss is stable. 
+
+F.3.4 Directional Flow Loss Components 
+
+The directional flow loss components λ1-to-2 and λ2-to-1 control the strength of the flow loss in the 1-to-2 and 2-to-1 directions respectively. In our experiments, though the performance is not significantly different, we recommend using bidirectional flow loss for symmetry and stability. 43 G Validation of the Fréchet Image and Video Metrics 
+
+G.1 Protocol 
+
+To confirm that the three Fréchet distances introduced in §6.3 (static content, dynamics and frame-wise) behave as intended on our Stochastic Moving MNIST benchmark, we performed a series of controlled experiments. Code for reproducing the experiments is available at https://github. com/nkiyohara/srvp-fd .
+
+G.1.1 Datasets. 
+
+For each trial, two datasets were instantiated as follows: • Content: Each containing 256 sequences of 25 frames. • Production method: Same as in the main text with identical hyperparameters, varying only specific factors (digit classes, handwriting samples, or dynamics). • Digit ordering: To remove ambiguity, a second copy of the first dataset was generated with digit indices swapped. The version yielding the smaller static Fréchet distance was retained. 1
+
+G.1.2 Conditions. 
+
+Four experimental conditions were repeated over 32 trials (each with a fresh random seed): • Different dynamics : same digits and handwriting, different dynamics. • Different digits : different digit classes, identical dynamics. • Different handwriting : same digit classes, different handwriting, identical dynamics. • Different both : different digit classes and different dynamics. 
+
+G.1.3 Computation of distances. 
+
+Distance computation details: • Encoder: Public SRVP encoder of Franceschi et al. [14]. • Frame-wise scores: Averaged the 25 frame distances to yield a single number per sequence pair. 
+
+G.2 Results 
+
+Table 16 reports the mean and standard deviation (over the 32 trials) of each metric. The metrics reflect the intended factors: • Varying only the dynamics ( different dynamics ) drives the dynamics distance up by an order of magnitude while leaving the static distance low. • Altering appearance while keeping motion fixed ( different digits /handwriting ) raises the 
+
+static distance, with digits > handwriting as expected, and leaves the dynamics distance low. • When both factors change ( different both ), both metrics are simultaneously high. • Frame-wise distances stay near zero unless both content and motion differ, indicating that they act as a weak sanity check. 
+
+> 1Without this post-hoc swap the static metric can be artificially inflated when the same digits appear in reverse order.
+
+44 Table 13: Effect of flow loss weight λ on test MSE (mean ± 95% confidence interval in t-statistic) for CMU Motion Capture (Setup 2). Auxiliary inner steps are fixed to K = 3 . Flow loss weight 
+
+λ = 1 .0, bidirectional( λ1-to-2 = λ2-to-1 = 1 .0), and KL weight β = βskip = 0 .3.Flow loss weight (λ) MSE 0.001 4.08 ± 0.46 
+
+0.003 3.77 ± 0.37 
+
+0.01 3.73 ± 0.48 
+
+0.03 3.36 ± 0.25 
+
+0.1 3.43 ± 0.29 
+
+0.3 3.60 ± 0.33 
+
+1.0 3.41 ± 0.27 
+
+Table 14: Effect of directional flow loss components on test MSE (mean ± 95% confidence interval in t-statistic) for CMU Motion Capture (Setup 2). Flow loss weight λ = 1 .0, inner loop steps for bridge model K = 3 , and KL weight β = βskip = 0 .3.Flow loss direction MSE 1-to-2 only λ1-to-2 = 1 , λ 2-to-1 = 0 3.66 ± 0.50 
+
+2-to-1 only λ1-to-2 = 0 , λ 2-to-1 = 1 3.48 ± 0.46 
+
+Bidirectional λ1-to-2 = λ2-to-1 = 1 3.41 ± 0.27 
+
+Table 15: Effect of auxiliary optimisation steps K on test MSE (mean ± 95% confidence interval in t-statistic) for CMU Motion Capture (Setup 2). Flow loss weight λ = 1 .0, bidirectional( λ1-to-2 =
+
+λ2-to-1 = 1 .0), and KL weight β = βskip = 0 .3. “Simultaneous” refers to updating auxiliary and main models jointly without inner loops for bridge model, as described in Appendix C.2. 
+
+K (auxiliary inner steps) MSE 0 (no auxiliary training) 261 .82 ± 124 .57 
+
+0 (simultaneous) 3.59 ± 0.61 
+
+1 3.35 ± 0.39 
+
+3 (default) 3.41 ± 0.27 
+
+5 3.68 ± 0.40 
+
+10 3.59 ± 0.38 
+
+Table 16: Mean ± standard deviation of the three Fréchet distances across 32 trials. 
+
+Condition Static Dynamics Frame mean 
+
+Different dynamics 2.57 ± 1.40 14 .85 ± 5.48 0.80 ± 0.14 
+
+Different digits 5.66 ± 1.82 1.75 ± 1.83 0.13 ± 0.06 
+
+Different handwriting 3.74 ± 1.65 1.79 ± 1.66 0.09 ± 0.05 
+
+Different both 6.78 ± 1.95 14 .74 ± 5.79 0.87 ± 0.13 
+
+45 G.3 Discussion 
+
+The clear separation between conditions, the low variance within each condition and the alignment with human intuition together demonstrate that our Fréchet metrics are both reliable and interpretable .They therefore provide a sound basis for quantitative evaluation of generative video models on Stochastic Moving MNIST, capturing complementary aspects of visual content and motion without leakage between the two. 46

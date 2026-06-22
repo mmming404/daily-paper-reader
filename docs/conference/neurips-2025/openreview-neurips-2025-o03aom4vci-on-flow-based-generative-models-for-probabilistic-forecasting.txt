@@ -1,0 +1,4769 @@
+Title: 24023_On_Flow_based_Generative.pdf
+
+URL Source: https://openreview.net/pdf?id=o03aOm4Vci
+
+Number of Pages: 43
+
+Markdown Content:
+# On Flow-based Generative Models for Probabilistic Forecasting 
+
+Anonymous Author(s) 
+
+Affiliation Address 
+
+email 
+
+## Abstract 
+
+Flow-based generative models (FBGM) have emerged as a dominant approach to 1
+
+generative modeling in many domains for their scalability and controllability, but 2
+
+have notably not made the same impact on autoregressive probabilistic forecasting. 3
+
+Although the methodology behind these models can be applied directly to the time 4
+
+series setting, and in theory offers the potential to apply the advances in generative 5
+
+modeling to time series, this direct approach is difficult to use in practice. In this 6
+
+work, we investigate this methodological gap by generalizing the key elements of 7
+
+flow-based generative modeling to the time series setting to devise a more practical 8
+
+related algorithm. We show that FBGMs based on linear stochastic differential 9
+
+equations are instances of a more general mean-field variational inference algorithm 10 
+
+for conditional exponential family distributions that constructs Bayes estimators 11 
+
+of natural parameters. This insight yields a family of mean-squared error based 12 
+
+latent probabilistic forecasters that contains a discrete time counterpart of FBGMs 13 
+
+for time series. We demonstrate that the models we develop inherit the convenient 14 
+
+theoretical properties of FBGMs while being easy to work with in practice. 15 
+
+## 1 Introduction 16 
+
+Flow-based generative models (FBGM), including denoising diffusion, score based diffusion, and 17 
+
+flow matching models, have become the dominant approach to generative modeling. These models 18 
+
+represent a stochastic differential equation (SDE) that transforms samples from a known prior 19 
+
+distribution into samples from an unknown target distribution, and often use a different recipe 20 
+
+for solving the generative modeling problem compared to traditional approaches. This alternative 21 
+
+approach is highly scalable [Ramesh et al., 2022, Podell et al., 2023, Saharia et al., 2022], can leverage 22 
+
+conditioning information in flexible ways [Dhariwal and Nichol, 2021, Ho and Salimans, 2022], and 23 
+
+can be controlled in order to incorporate user defined dynamics [Liu et al., 2024, Domingo-Enrich 24 
+
+et al., 2024, Havens et al., 2025]. Furthermore, FBGMs are capable of learning from paired data. If x025 
+
+and x1 are samples from an unknown joint distribution p(x0, x 1), then one can use the same approach 26 
+
+to construct an SDE whose transition distribution from t = 0 to t = 1 is p(x1|x0) [De Bortoli et al., 27 
+
+2023]. Given this capability, it directly follows that this approach could, in principle, be used to 28 
+
+construct an SDE to model time series data. If p(x1: N ) = p(x1) QN −1 
+
+> k=1
+
+p(xk+1 |x1: k) represents the 29 
+
+unknown distribution of time series data, then each of the transition terms, p(xk+1 |x1: k), can be 30 
+
+interpreted as a target distribution for a FBGM in the paired data setting where the data pairs are 31 
+
+consecutive elements of the time series, (xk+1 , x k), and the previous elements x1: k−1 can be thought 32 
+
+of as extra conditioning information. In theory, learning this kind of model for time series would 33 
+
+inherit the scalability and controllability that FBGMs possess, allowing practitioners to port over 34 
+
+the recent advances in generative modeling to time series applications. However, this approach has 35 
+
+surprisingly only recently been explored [Chen et al., 2024a, Tamir et al., 2024, Park et al., 2024, 36 
+
+Chen et al., 2024b] even though diffusion based time series models have been studied for several 37 
+
+Submitted to 39th Conference on Neural Information Processing Systems (NeurIPS 2025). Do not distribute. years [Yang et al., 2024, Meijer and Chen, 2024]. We attribute this gap to the practical numerical 38 
+
+difficulties associated with training and sampling from these models as one must first learn, and 39 
+
+then simulate, a stochastic differential equation, with potentially non-smooth dynamics, over a long 40 
+
+time domain compared to the short time domain encountered in standard generative modeling. To 41 
+
+address this problem, we develop a discrete time version of Neural SDEs derived from FBGMs 42 
+
+that are founded on the same theoretical principles, while being substantially easier to work with 43 
+
+in practice. We do this by generalizing two key elements needed to construct FBGMs, stochastic 44 
+
+interpolation and the Markovian projection, to the time series setting, where they become Gaussian 45 
+
+condition random fields and a form of mean-field variational inference respectively. We construct a 46 
+
+family of latent probabilistic time series models that are closely related to existing time series models, 47 
+
+including MSE based non-probabilistic forecasters and conditional Gaussian autoregressive models, 48 
+
+and compare their performance on various latent probabilistic forecasting problems. 49 
+
+## 2 Background 50 
+
+We will first review how flow-based generative models are constructed and then build intuition for 51 
+
+how to go about generalizing this construction to the time series setting. Suppose that p(y0, y 1) is a 52 
+
+joint distribution over a source and target random variable. The (paired) generative modeling problem 53 
+
+is to find a parametric approximation of p(y1|y0) 1. Flow-based generative models solve this problem 54 
+
+by constructing, and then learning, a latent SDE whose transition distribution from times t = 0 to 55 
+
+t = 1 is p(y1|y0). There are three steps involved in constructing and learning this SDE - stochastic 56 
+
+interpolation , the Markovian projection , and matching .57 
+
+Stochastic interpolation [Albergo and Vanden-Eijnden, 2023] is used to interpolate between proba-58 
+
+bility distributions by defining interpolations between their samples. For example, consider the joint 59 
+
+distribution p(x0, x t, x 1), where xt = (1 − t)x0 + tx 1 and (x0, x 1) ∼ p(x0, x 1). By the definition 60 
+
+of xt, it is true that p(xt=1 ) = p(x1), and also that p(xt=1 |x0) = p(x1|x0), so we verify that the 61 
+
+marginal distribution of xt interpolates between p(x0) and p(x1). In practice, one assumes that at 62 
+
+times t = 0 and t = 1 , x0 := y0 and x1 := y1 so that p(xt) is an interpolation between p(y0) and 63 
+
+p(y1).64 
+
+A popular method for constructing stochastic interpolants, which we use in this paper, is conditioning 65 
+
+a user-defined base SDE, whose diffusion coefficient does not depend on the current state, to start at 66 
+
+x0 and end at x1. This SDE takes the form dx t = bt(xt)dt + LtdW t where bt(xt) is the drift of this 67 
+
+base SDE and Lt is the diffusion coefficient. This SDE is used to construct a joint distribution of 68 
+
+the form p(x0, x t, x 1) = p(xt|x0, x 1)p(x0, x 1) where p(xt|x0, x 1) is the probability of xt when the 69 
+
+base SDE has been conditioned to start at x0 and end at x1. In order to solve the generative modeling 70 
+
+problem of p(x1|x0), FBGMs are constructed as an SDE whose marginal distribution is p(xt|x0).71 
+
+This is accomplished using the Markovian projection .72 
+
+Proposition 1 (Markovian projection SDE [Shi et al., 2024]) . Let p(x1|x0) be a conditional distribu-73 
+
+tion over target variables given source variables and let p(xt|x0, x 1) denote the distribution of the 74 
+
+base SDE dx t = bt(xt)dt + LtdW t when conditioned to start at x0 and end at x1. The “Markovian 75 
+
+projection SDE” is an SDE whose marginal distribution, denoted by q∗(xt|x0) is equal to p(xt|x0).76 
+
+It is given by: 77 
+
+dx t = ( bt(xt) + LtLTt Ep(x1|x0,x t) [∇ log p(x1|x0, x t)]) dt + LtdW t (1) See Prop 3. of [De Bortoli et al., 2023] for a proof. Proposition 1 is a solution to the paired generative 78 
+
+modeling problem because q∗(xt=1 |x0) = p(x1|x0) := p(y1|y0). Given a sample from the source 79 
+
+distribution, x0 ∼ p(x0), we can simulate the SDE from t = 0 to t = 1 to generate a sample from the 80 
+
+target distribution. However, this SDE contains an intractable drift term that depends on the posterior 81 
+
+distribution of x1 given x0 and xt. This is addressed using a matching learning objective. For 82 
+
+example, in score matching, [Vincent, 2011, Song et al., 2021], one writes the drift in the following 83 
+
+variational form: 84 
+
+∇ log q∗(xt|x0) = argmin 
+
+> st(xt,x 0)
+
+Ep(x0,x 1,x t)
+
+î LtLTt ∇ log p(x1|x0, x t) − st(xt, x 0) 2ó (2) 
+
+> 1
+
+The unpaired setting is when we do not condition on y0.
+
+2If s(xt, x 0; θ) is parameterized by a neural network, then one can minimize this expectation using 85 
+
+the standard machine learning toolkit to find the Markovian projection SDE. However, obtaining a 86 
+
+Monte Carlo estimate of the expectation for stochastic gradient descent requires being able to sample 87 
+
+from p(x0, x 1, x t), which requires simulation of the base SDE. As such, the base SDE is chosen so 88 
+
+that this distribution is tractable. After training is complete, then the flow-based generative model is 89 
+
+given by the SDE dx t = ( bt(xt) + LtLTt st(xt, x 0)) dt + LtdW t. In general, matching algorithms, 90 
+
+such as score matching, drift matching and bridge matching, are algorithms for learning the Bayes 91 
+
+estimator of a random variable because of the well known relationship between posterior expectations 92 
+
+and mean squared error [Jaynes, 2003]: 93 
+
+Proposition 2 (Bayes estimate of parameter) . Let p(z, θ ) be a joint distribution and let θ∗(z) be 94 
+
+the Bayes estimate of θ based on z under the squared error risk. Then the Bayes estimate takes the 95 
+
+following two forms: 96 
+
+θ∗(z) = Ep(θ|z)[θ] = argmin  
+
+> f(z)
+
+Ep(z,θ )
+
+∥f (z) − θ∥2 (3) See Appendix C.3 for a derivation. In score matching, one would have z = ( x0, x t) and θ =97 
+
+∇ log p(x1|x0, x t), while other matching approaches, such as flow matching [Albergo and Vanden-98 
+
+Eijnden, 2023, Lipman et al., 2023, Liu et al., 2023] and bridge matching [Shi et al., 2024]. 99 
+
+Given the strong theoretical, interpretability, and empirical results of FBGMs, one might expect 100 
+
+that a direct application to time series would inherit the same benefits. However, this approach has 101 
+
+surprisingly only recently been explored [Chen et al., 2024a,b, Tamir et al., 2024, Park et al., 2024] 102 
+
+even though diffusion based time series models have been studied in a different manner for several 103 
+
+years [Yang et al., 2024, Meijer and Chen, 2024]. We attribute this gap to the challenges that the time 104 
+
+series setting presents to flow-based methods compared to settings such as image generation. In the 105 
+
+standard image generation setting, there is no coupling between the prior and data distributions, and 106 
+
+so one can learn SDEs that can be easily simulated with a few number of function evaluations [Liu 107 
+
+et al., 2023, Pooladian et al., 2023]. However, SDEs that are constructed to model time series data 108 
+
+present a challenge during inference due to compounding numerical errors that are attributed to either 109 
+
+a mismatch between the learned model and data, or due to the numerical solver itself, get accumulated 110 
+
+during generation which can lead to poor performance in practice. Discrete time autoregressive 111 
+
+models, on the other hand, do not suffer from these issues to the extent that Neural SDEs do and are 112 
+
+much more widely used in practice. With this in mind, we aim to understand find a discrete time 113 
+
+version of FBGMs for time series that will work better in practice. 114 
+
+## 3 Method 115 
+
+We present a generalization of the FBGM construction for the time series setting. 116 
+
+3.1 Generalized linear stochastic interpolation 117 
+
+Recall that stochastic interpolation constructs a distribution over a latent stochastic process, which 118 
+
+we denote by x, that is sampled from a base SDE that is conditioned to start at x0 := y0 and end at 119 
+
+x1 := y1. Our generalization of stochastic interpolation is founded on the observation that many 120 
+
+of the base SDEs used in practice are linear SDEs, and that the FBGM recipe is unchanged if we 121 
+
+introduce Gaussian potential functions to relax the endpoint conditions. Since linear SDEs have 122 
+
+Gaussian transition distributions, they can naturally be combined with these Gaussian potentials to 123 
+
+construct a Gaussian conditional random field. This conditional random field will serve as our tool 124 
+
+for stochastic interpolation, which we call “generalized linear stochastic interpolation”. 125 
+
+Let yτ1: T denote time series data that is generated by an unknown distribution p(yτ1: T ). For brevity, 126 
+
+we assume that τ1: T is the same for all time series, but note that our theory accommodates datasets 127 
+
+with series sampled at different times. We will construct, and perform inference, in the distribution 128 
+
+p(x|yτ1: T ), which we will obtain by conditioning a linear SDE on user defined Gaussian potential 129 
+
+functions. The potential function at time tk ∈ R will be denoted by ϕ(xtk |θtk (yτ1: T )) , where θtk the 130 
+
+the natural parameter of the Gaussian that arbitrarily depends on yτ1: T . See Appendix C for a review of 131 
+
+exponential family distributions. We also use the notation ϕk+1 |k(xk+1 |xk) = N (xk+1 |Ax k + u, Σ) 132 
+
+to denote a Gaussian transition distribution from xk to xk+1 with state transition matrix A, bias 133 
+
+vector u and covariance matrix Σ.134 
+
+3y0 y1
+
+## x p(x|y0, y1)(a) Stochastic interpolation y 0
+
+## y 1
+
+## y 2
+
+## y 3x        
+
+> p(x| ( y1 : 4 ))
+> (xtk|tk(y1 : 4 ))
+
+(b) Generalized stochastic interpolation 
+
+Figure 1: Generalized stochastic interpolation incorporates Gaussian potential functions to relax the endpoint conditions of stochastic interpolation and is applied to time series data. 
+
+3.1.1 Gaussian conditional random fields 135 
+
+Chain structured Gaussian CRFs are a tractable class of probabilistic models that are widely used in 136 
+
+time series modeling (CITE): 137 
+
+Definition 1 (Conditional Random Field [Lafferty et al., 2001, Sutton et al., 2012]) . Let x1: N be a 138 
+
+sequence of random variables, ϕk+1 |k(xk+1 |xk) be a set of Gaussian transition distributions between 139 
+
+consecutive variables, and ϕ(xk|θk) a set of Gaussian potential functions with natural parameters 140 
+
+θk ∈ θ. A conditional random field (CRF) is a probability distribution given by: 141 
+
+p(x1: N |θ) ∝ 
+
+> N−1
+
+Y
+
+> k=1
+
+ϕk+1 |k(xk+1 |xk)
+
+> N
+
+Y
+
+> k=1
+
+ϕ(xk|θk) (4) Due to the chain-structure of p(x1: N |θ) and the fact it is jointly Gaussian, inference can be performed 142 
+
+efficiently using message passing. The backward messages, defined below, will play a significant role 143 
+
+in our theory: 144 
+
+Proposition 3 (Backward messages) . The k’th backward message associated with the CRF in 145 
+
+Definition 1 is defined with the following recurrence relation: 146 
+
+ϕ(xk−1|βk−1) = 
+
+Z
+
+ϕk|k−1(xk|xk−1)ϕ(xk|θk + βk)dx k, βN = 0 (5) 
+
+where θk+1 + βk+1 denotes the direct sum of θk+1 and βk+1 . This recurrence also uniquely identifies 147 
+
+a function, denoted by Φk,k +1 that performs the parameter updates as: 148 
+
+βk = Φ k,k +1 (θk+1 + βk+1 ) (6) Note that each βk is a function of θk+1: N . See Appendix D for a full derivation of sequential and 149 
+
+parallel message passing, and Appendix H for pseudo code and implementation considerations. 150 
+
+Although we do not focus on the forward messages, they are defined with analogous recurrence 151 
+
+relations to the backward messages and can be used to extend our methodology to flow-matching 152 
+
+models for time series forecasting (see Corollary 5). CRFs offer an efficient way to model the latent 153 
+
+variables at a fixed set of times, but are not immediately suited for continuous time. 154 
+
+3.1.2 Linear time-invariant stochastic differential equations 155 
+
+We will use linear-time invariant SDEs to construct the transition distributions of continuous time 156 
+
+CRFs. Linear time-invariant SDEs (LTI-SDEs) are SDEs of the form dx t = F x tdt + LdW t, where 157 
+
+the drift matrix F and diffusion coefficient matrix L are constant with respect to t and xt. LTI-SDEs 158 
+
+have the convenient property that their transition distribution is available in closed form [Särkkä and 159 
+
+Solin, 2019, Singhal et al., 2023]. The transition distribution from xt to xt+s, where s > 0 is an 160 
+
+increment of time, is given by 161 
+
+ϕt+s|t(xt+s|xt) = N (xt+s|Asxt, Σs), where 
+
+ïAs ΣsA−Ts
+
+0 A−Ts
+
+ò
+
+:= exp 
+
+ßï F LL T
+
+0 −F T
+
+ò
+
+s
+
+™
+
+(7) 4We use LTI-SDEs for their tractability, but note that our theory is completely compatible with more 162 
+
+general linear SDEs. One can directly plug in this transition distribution into a CRF in Definition 1 to 163 
+
+obtain a conditional random field over a continuous time domain. However, we can be more general. 164 
+
+In the next proposition, we highlight a relationship between conditioned linear SDEs and CRFs 165 
+
+([Särkkä et al., 2006, Särkkä and Solin, 2019]): 166 
+
+Proposition 4 (Conditioned LTI-SDE) . Let ϕt+s|t(xt+s|xt) be the transition distribution of the 167 
+
+LTI-SDE dx t = F x tdt + LdW t and let {ϕ(xtk |θtk )}tk ∈R be potential functions at times in the set 168 
+
+R. Then the piecewise-linear SDE, 169 
+
+dx t = ( F x t + LL T ∇ log ϕ(xt|βt)) dt + LdW t, xt1 ∼ ϕ(xt1 |β1 + θ1) (8) 
+
+where t ∈ (tk, t k+1 ) and tk, t k+1 ∈ R , has a joint distribution at the times t1: N = T ⊇ R that is 170 
+
+given by a CRF: 171 
+
+p(xt1: N |θ) ∝ Y 
+
+> tk∈T
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y 
+
+> tk∈R
+
+ϕ(xtk |θtk ) (9) 
+
+where βt = Φ t,t k+1 (θtk+1 + βtk+1 ).172 
+
+See appendix Appendix E.1 for the full proof and Corollary 5 for a nice expression for the associated 173 
+
+probability flow ODE in terms of both the forward and backward messages. Proposition 4 suggests 174 
+
+that a practical way to work with conditioned linear SDEs in practice is convert them into CRFs on a 175 
+
+discretization of the time domain so that inference can be performed via message passing. This results 176 
+
+in the ability to sample and perform inference in linear SDEs O(log |T | ) time on parallel compute 177 
+
+[Hassan et al., 2021, Corenflos et al., 2021, Smith et al., 2023]. The conditioned SDE Proposition 4 178 
+
+is our main tool for stochastic interpolation as it gives us the ability to sample from p(x|θ(yτ1: T )) at 179 
+
+an arbitrary discretization of the time domain. 180 
+
+3.2 Target probabilistic model for FBGM 181 
+
+Recall that in the FBGM recipe, we used the stochastic interpolation to construct a joint distribution 182 
+
+over the interpolant and the data, p(y0, x t, y 1), before performing the Markovian projection. We can 183 
+
+take the same step here to construct a joint distribution over yτ1: T and x using the data distribution, 184 
+
+p(yτ1: T ) and the distribution of the interpolant, p(x|yτ1: T ) := p(x|θ(yτ1: T )) .185 
+
+Definition 2 (Target joint distribution) . Let p(yτ1: T ) be the distribution of observed time series data 186 
+
+and let p(x|yτ1: T ) be the distribution of the generalized linear stochastic interpolant, which is the 187 
+
+distribution of a linear SDE conditioned on the user defined potential functions {θtk (yτ1: T )}tk ∈R at 188 
+
+the times R, as in Proposition 4. Then the induced joint distribution over x at the times t1: N = T ⊃ R 189 
+
+and yτ1: T is given by: 190 
+
+p(xt1: N , y τ1: T ) = p(yτ1: T ) 1
+
+Z(yτ1: T )
+
+Y 
+
+> tk∈T
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y 
+
+> tk∈R
+
+ϕ(xtk |θtk (yτ1: T )) 
+
+!
+
+(10) 
+
+where Z(yτ1: T ) is the partition function of p(xt1: N |yτ1: T ).191 
+
+Before continuing, it is crucial that we understand this joint distribution and the role it plays in 192 
+
+the FBGM recipe. Unlike the standard approach to generative modeling where one defines a joint 193 
+
+distribution by defining a prior over the latent variable and a likelihood distribution over the data, 194 
+
+the FBGM uses an alternate construction to build p(x, y τ1: T ) using the data distribution directly. 195 
+
+Furthermore, the tools FBGMs employ are fundamentally designed for probabilistic inference in 196 
+
+x instead of yτ1: T . Since x is completely user designed through the choice of base LTI-SDE and 197 
+
+potential functions, we are able to solve a wide range time series problems. 198 
+
+Suppose we split each sequence of data into observed and unobserved portions, yτ1: T = ( yO , y U ),199 
+
+where yO is a subsequence that we observe at both train and test time while yU is only observed 200 
+
+at training time, as is the case in time series forecasting. 2 The ability to perform inference in 201 
+
+p(x|yO ) would solve a general latent probabilistic forecasting problem that reduces to the stan-202 
+
+dard forecasting problem if the Gaussian potential functions are chosen as dirac delta functions -203 
+
+> 2
+
+This also covers the imputation setting, but we do not explore this in the interest of keeping a narrow scope. 
+
+5z x(a) p(x|z, θ )z x 
+
+> *(z)
+
+(b) q∗(x|z) = p(x|z, θ ∗(z)) 
+
+Figure 2: The CMFVI approximation of p(x|z) is q∗(x|z). Choosing (x, z, θ ) = ( xt1: N , y O , θ (yτ1: T )) 
+
+recovers qMSE , (x, z, θ ) = (xtk , (xt1: k−1 , y O ), θ (yτ1: T )) recovers qMSE-AR and (x, z, θ ) =lim s→0(xt+s, (xt, x t1: k−1 , y O ), θ (yτ1: T )) for t ∈ (tk, t k+1 ) recovers qNeural-SDE .
+
+ϕ(xtk |θtk (yτ1: T )) := δ(xtk − ytk ). For example, if one chooses the LTI-SDE to be the Wiener ve-204 
+
+locity model [Särkkä and Solin, 2019, Särkkä et al., 2006] and potential functions of the form 205 
+
+ϕ(xtk |θ(yτ1: T )) ∝ N (xtk |ytk , σ 2I), then inference in p(x|yO ) corresponds to forecasting the 206 
+
+smoothed position and velocity of the particle whose positions were observed at yτ1: T . However, 207 
+
+p(x|yO ) is intractable because p(yτ1: T ) is arbitrary. To this end, we develop variational inference 208 
+
+algorithms for this task. 209 
+
+3.3 Neural latent SDE for latent probabilistic forecasting 210 
+
+The first inference algorithm we develop is a direct extension of flow-based generative models to the 211 
+
+latent probabilistic forecasting setting. For a fixed discretization of the time domain, we can treat 212 
+
+consecutive latent variables (xtk , x tk+1 ) as elements of a paired dataset with the previous elements 213 
+
+xt1: k−1 and observations yO as extra conditioning information. This lets us directly apply the existing 214 
+
+FBGM recipe to construct a conditional, piecewise SDE to solve the latent probabilistic forecasting 215 
+
+problem. 216 
+
+Proposition 5 (Neural latent SDE) . Let p(xt1: N , y τ1: T ) be the joint distribution defined in Definition 2 217 
+
+and suppose that yτ1: T = ( yO , y U ), where O and U are the times at which sequences are observed 218 
+
+and unobserved at test time, respectively. Then the neural latent SDE is the following piecewise SDE: 219 
+
+dx t = ( Ftxt + LtLTt ∇ log ϕ(xt|β∗ 
+
+> t
+
+(xt, x t1: k , y O ))) dt + LtdW t, (11) 
+
+where β∗ 
+
+> t
+
+(xt, x t1: k , y O ) = Ep(yU |xt,x t1: k ,y O ) [βt(yτ1: T )] , and t ∈ (tk, t k+1 ) (12) 
+
+Furthermore, the transition distribution of this SDE from time tk to tk+1 is p(xtk+1 |xt1: k , y O ). We 220 
+
+will use qNeural-SDE to denote the path measure associated to this SDE. 221 
+
+See Appendix G.2 for a proof and Appendix G for the general constructions of the score function, 222 
+
+Markovian projection SDE and probability flow ODE. By construction, Proposition 5 can be used to 223 
+
+solve the latent probabilistic forecasting problem because it has the correct joint distribution over the 224 
+
+latent space. Furthermore, its form is almost identical to that of its base LTI-SDE in Proposition 4, 225 
+
+except that its parameter, β∗, is the Bayes estimator of a backward message. We will show next that 226 
+
+models of this form can be derived by solving a constrained mean-field variational inference problem. 227 
+
+3.4 Constrained mean-field variational inference 228 
+
+Next we introduce our main contribution which is the variational inference algorithm underlying 229 
+
+FBGMs, which we call “constrained mean-field variational inference”. Given a conditional expo-230 
+
+nential family distribution p(x|z, θ ), CMFVI constructs a variational approximation of p(x|z) that is 231 
+
+given by p(x|z, θ ∗(z)) where θ∗(z) is the Bayes estimator of θ given z. We first introduce CMFVI in 232 
+
+an abstract way and then show how it can be used to do variational inference on the latent probabilistic 233 
+
+forecasting distribution, p(xt1: N |yO ).234 
+
+Suppose that z is a random variable, θ ∼ p(θ|z) is the natural parameter of an exponential family 235 
+
+distribution, and x ∼ p(x|z, θ ) is a random variable drawn from a conditional exponential family of 236 
+
+the form p(x|z, θ ) = exp {⟨ tz (x), θ ⟩− A(z, θ )}. For intuition, assume that x represents the future of a 237 
+
+stochastic process, z represents its past , and θ represents the parameters of this process. Furthermore, 238 
+
+6suppose that the parameters are only available at training time so that at test time, sampling x given 239 
+
+z requires the ability to sample from p(x|z). Our goal is to predict the future of the process given 240 
+
+its past, which requires the ability to sample from p(x|z), however this distribution is intractable 241 
+
+because p(θ|z) is arbitrary. To this end, we introduce a variational approximation of p(x|z) using an 242 
+
+algorithm closely resembling mean field variational inference, which we call “constrained mean field 243 
+
+variational inference” (CMFVI): 244 
+
+Theorem 1 (Constrained mean field VI solution) . Let p(x|z, θ ) ∝ exp {⟨ tz (x), θ ⟩ − A(z, θ )} be 245 
+
+a conditional exponential family distribution with θ ∼ p(θ|z). The constrained mean field VI 246 
+
+approximation of p(x|z), denoted by q∗(x|z), is defined as follows: 247 
+
+q∗(x|z) = argmin 
+
+> q(x|z)
+
+KL [ q(x|z)p(θ|z)∥p(x, θ |z)] (13) 
+
+= p(x|z, θ ∗(z)) , where θ∗(z) = Ep(θ|z) [θ] (14) See Appendix F.1 for a proof, Lemma 4 for equivalent expressions for the objective involving 248 
+
+KL[ q∗(x|z)∥p(x|z)] and a term resembling the mutual information between x and θ given z. The 249 
+
+parameter θ∗(z) is the Bayes estimator of θ given z and by Proposition 2 can be learned using mean 250 
+
+squared error minimization, provided that it is possible to sample from p(z, θ ). While this variational 251 
+
+approximation is tractable, it seems restrictive because it is a conditional random field and only exact 252 
+
+when θ and x are conditionally independent given z. However, this may not be a terrible assumption 253 
+
+in the time series setting. If the process is deterministic, then we should be able to compute x directly 254 
+
+from z without needing to know θ, and so this independence assumption will hold because one will 255 
+
+be able to compute the future values of the process directly from its past. In fact, in Corollary 8, 256 
+
+we show that a direct application of CMFVI to p(xt1: N |yO ), by selecting x = xt1: N , z = yO and 257 
+
+θ = θ(yτ1: T ), exactly recovers MSE based non-probabilistic forecasters, which are clearly capable of 258 
+
+learning deterministic processes (see Corollary 8). We denote the model in Corollary 8 by qMSE . In 259 
+
+general, provided that the process is not too stochastic, we might expect that given a long enough 260 
+
+history and a short enough prediction horizon that CMFVI could yield a reasonable approximation of 261 
+
+p(x|z), and perhaps with an infinitely short prediction horizon we may recover something exactly. 262 
+
+This intuition motivates the use of CMFVI for learning the autoregressive factors of p(xt1: N |yO ) in 263 
+
+order to construct an autoregressive model to solve the probabilistic forecasting problem. 264 
+
+Suppose that p(xtk |xt1: k−1 , y O ) is one of the autoregressive factors of the latent forecasting distri-265 
+
+bution p(xt1: N |yO ). We can use CMFVI to approximate each of the k factors by setting x = xtk ,266 
+
+z = ( xt1: k−1 , y O ) and θ = θ(yτ1: T ):267 
+
+Proposition 6 (CMFVI transition approximation) . Let p(xt1: N |yO ) be the target distribution and 268 
+
+consider its k’th autoregressive factor p(xtk |xt1: k−1 , y O ). Then the CMFVI transition approximation 269 
+
+is given by: 270 
+
+qtransition (xtk |xt1: k−1 , y O ) ∝ ϕtk |tk−1 (xtk |xtk−1 )ϕ(xtk |β∗ 
+
+> tk
+
+(xt1: k−1 , y O )) (15) 
+
+where β∗ 
+
+> tk
+
+(xt1: k−1 , y O ) = Ep(yU |xt1: k−1 ,y O ) [βtk (yτ1: T )] is the Bayes estimate of βtk (yτ1: T ), which is 271 
+
+defined using the message passing update operator Φtk ,t k+1 from Definition 7 as: 272 
+
+βtk =
+
+®Φtk ,t k+1 (βtk+1 (yτ1: T ) + θtk+1 (yτ1: T )) if tk+1 ∈ R 
+
+Φtk ,t k+1 (βtk+1 (yτ1: T )) otherwise (16) See Proposition 6 for a proof. The form of Proposition 6 almost exactly matches the transition 273 
+
+distribution of p(xt1: N |yτ1: T ) in Proposition 12, except that the backward messages are replaced with 274 
+
+their Bayes estimators. We will use qtransition to construct an autoregressive approximation model that 275 
+
+will be a discrete time version of the Markovian projection SDE. 276 
+
+To use CMFVI to construct a discrete time version of FBGMs for time series, we will need to 277 
+
+make the assumption that the covariances of the potential functions are independent of the values 278 
+
+of yτ1: T . This assumption holds in both the data space forecasting setting where we use dirac delta 279 
+
+potential functions, and also in the case where the CRF is constructed as a linear dynamical system 280 
+
+with constant observation noise. In this setting, it is also possible to rewrite qNeural SDE in a more 281 
+
+interpretable form where the only unknown value is the mean of the next backward message: 282 
+
+Corollary 1 (Neural latent SDE using potentials with fixed covariances) . If the covariance matrices 283 
+
+associated with qNeural SDE are constant with respect to y, then the SDE associated with qNeural SDE is: 284 
+
+dx t = ( Ftxt + LtLTt ∇ log N (xt|μβt
+
+> ∗
+
+(xt, x t1: k−1 , y O ), Σβt )) dt + LtdW t (17) 7where t ∈ (tk−1, t k), Σβt is the covariance of ϕ(xt|βt(yτ1: T )) and μ∗ 
+
+> t
+
+(xt, x t1: k−1 , y O ) is the Bayes 285 
+
+estimator for it’s mean. 286 
+
+The result follows directly from converting βtk from natural parameters to standard parameters 287 
+
+of a Gaussian and the linear equivariance of the Bayes estimator Appendix F.2. Note that by our 288 
+
+assumption that the parameters of the potential functions do not depend on yτ1: T , Σβt can be computed 289 
+
+by performing message passing on p(xt1: N |∅τ1: T ), where ∅τ1: T is an empty (or random) sequence 290 
+
+sampled at the same times as yτ1: T .291 
+
+3.5 Discrete time Markovian projection 292 
+
+We propose an conditional Gaussian autoregressive model whose transition distributions are given 293 
+
+by qtransition , which we denote by qMSE-AR . We will directly relate it to Markovian projection SDE 294 
+
+qNeural-SDE by associating qMSE-AR with a piecewise linear SDE that closely resembles qNeural-SDE .295 
+
+Proposition 7 (Autoregressive CMFVI solution) . Let p(xt1: N |yO ) be the target distribution, as-296 
+
+sume that the covariance matrices of its potential functions are constant with respect to y. The 297 
+
+autoregressive model whose transitions are CMFVI solution, denoted by qMSE-AR is given by: 298 
+
+qMSE-AR (xt1: N |yO ) ∝ p(xt1 |yO ) Y 
+
+> tk∈T
+
+ϕtk |tk−1 (xtk |xtk−1 )N (xtk |μβtk
+
+> ∗
+
+(xt1: k−1 , y O ), Σβtk ) (18) 
+
+where Σβtk and μβtk
+
+> ∗
+
+(xt1: k−1 , y O ) are the same as in Corollary 1. Furthermore, qMSE-AR has the same 299 
+
+joint distribution over xt1: N as the following piecewise linear SDE: 300 
+
+dx t = ( Ftxt + LtLTt ∇ log N (xt|μβt
+
+> ∗
+
+(xt1: k−1 , y O ), Σβt )) dt + LtdW t, xt1 ∼ p(xt1 |yO ) (19) 
+
+where μ∗ 
+
+> t
+
+(xt1: k−1 , y O ) is the Bayes estimator for the mean of βt(yτ1: T ) = Φ t,t k (βtk+1 (yτ1: T )) , Σβt is 301 
+
+its covariance matrix and t ∈ (tk−1, t k) for k = 2 , . . . , T .302 
+
+See Appendix F.3 and Definition 9 for a proof. A comparison of the piecewise linear SDE associated 303 
+
+with qMSE-AR with the piecewise SDE associated to qNeural-SDE reveals why we interpret qMSE-AR as the 304 
+
+discrete time version of the Markovian projection SDE. We can see that the only difference between 305 
+
+the two SDEs are their Bayes estimators for μβt (yτ1: T ):306 
+
+qMSE-AR :μβt
+
+> ∗
+
+(xt1: k , y O ) = Ep(yU |xt1: k ,y O )
+
+îμβt (yτ1: T )ó
+
+qNeural-SDE :μβt
+
+> ∗
+
+(xt, x t1: k , y O ) = Ep(yU |xt,x t1: k ,y O )
+
+îμβt (yτ1: T )ó
+
+The only difference between the two Bayes estimators is their dependence on the current state xt.307 
+
+If xt does not carry more information about yU compared to what is already available from xt1: k
+
+> 308
+
+and yO , then we can expect that qMSE-AR and qNeural-SDE will model nearly the same distribution. As 309 
+
+we will show in our experiments, this is something that one can expect in the time series setting 310 
+
+because data is usually sampled frequently enough where the extra capacity that qNeural-SDE has over 311 
+
+qMSE-AR may not make enough of an impact in practice to warrant using qNeural-SDE in practice. We 312 
+
+introduced three different CMFVI based time series models - qMSE 8, qMSE-AR 7 and qNeural-SDE 1313 
+
+which use CMFVI to joint distribution, transition distributions, and infinitesimal transitions of the 314 
+
+target distribution respecitvely. All of these models are Gaussian, and are therefore closely related to 315 
+
+existing time series models. 316 
+
+3.6 Connection to traditional time series models 317 
+
+The CMFI-based time series models that we have developed all have an autoregressive Gaussian 318 
+
+structure which makes them related to existing time series models. First, when one chooses potential 319 
+
+functions to align with the data times R = τ1: T , then qMSE is identical to MSE based non-probabilistic 320 
+
+forecasters, which are are trained to predict the future of a time series, yU given an observed history, 321 
+
+yO . Next, qMSE-AR is a conditional Gaussian autoregressive model that is trained to minimize a 322 
+
+mean-squared error based objective. This model is in the same family as conditional Gaussian models 323 
+
+that are trained for maximum likelihood, but differ in that qMSE-AR can be though of parameterizing 324 
+
+the mean of each transition distribution whereas maximum likelihood models parameterize both the 325 
+
+mean and covariance. Overall, the models that we have developed can be seen as mean-squared 326 
+
+error based time series models for probabilistic forecasting where the uncertainty in the models only 327 
+
+depend on the time in between observations and not the observations themselves. 328 
+
+8Brusselator Double Pendulum FitzHugh Lorenz Lotka Van der Pol MSE 3.04 ± 0.69 9.03 ± 0.34 27.75 ± 4.50 5.91 ± 0.60 2.16 ± 1.18 -0.77 ± 0.01 AR-MSE 0.49 ± 0.18 0.61 ± 0.02 15.08 ± 1.18 8.82 ± 0.29 0.12 ± 0.25 -0.59 ± 0.01 AR-MLE (Latent) 3.39 ± 1.91 0.43 ± 0.01 13.10 ± 2.48 8.49 ± 1.05 0.23 ± 0.27 -0.70 ± 0.00 AR-MLE (Obs.) 3.79 ± 2.05 0.42 ± 0.01 13.35 ± 2.47 7.77 ± 0.76 0.11 ± 0.32 -0.70 ± 0.00 FBGM (Latent) 2.06 ± 1.12 0.56 ± 0.03 6.15 ± 0.75 12.11 ± 0.80 0.17 ± 0.42 -0.69 ± 0.00 FBGM (Obs.) 0.93 ± 0.29 0.51 ± 0.01 11.67 ± 1.80 5.28 ± 0.50 0.47 ± 0.67 -0.71 ± 0.00 
+
+(a) Negative log likelihood (lower is better) 
+
+Brusselator Double Pendulum FitzHugh Lorenz Lotka Van der Pol MSE 0.56 ± 0.02 0.99 ± 0.00 2.15 ± 0.16 1.09 ± 0.01 0.50 ± 0.02 0.48 ± 0.00 AR-MSE 0.59 ± 0.01 1.16 ± 0.01 3.58 ± 0.27 1.25 ± 0.01 0.55 ± 0.03 0.52 ± 0.00 AR-MLE (Latent) 0.65 ± 0.04 1.27 ± 0.01 2.32 ± 0.17 1.26 ± 0.03 0.59 ± 0.03 0.52 ± 0.01 AR-MLE (Obs.) 0.66 ± 0.05 1.27 ± 0.01 2.37 ± 0.13 1.26 ± 0.04 0.58 ± 0.03 0.52 ± 0.01 FBGM (Latent) 0.62 ± 0.05 1.20 ± 0.01 2.34 ± 0.17 1.09 ± 0.03 0.55 ± 0.03 0.49 ± 0.01 FBGM (Obs.) 0.64 ± 0.02 1.17 ± 0.01 2.29 ± 0.15 1.08 ± 0.02 0.55 ± 0.03 0.51 ± 0.00 
+
+(b) Normalized root mean squared error (lower is better) 
+
+Table 1: Evaluation metrics for our models (MSE and AR-MSE) for probabilistic forecasting compared to baseline models trained in both the latent and data spaces. 
+
+## 4 Experiments 329 
+
+We compare the performance of our models versus other approaches to time series modeling in latent 330 
+
+probabilistic forecasting on dynamical system datasets. We created 6 synthetic datasets representing 331 
+
+noisy observations of dynamical systems. Our models used a Wiener velocity model as our base SDE 332 
+
+and emission potentials of the form ϕ(xtk |θtk (yτ1: N )) ∝ N (ytk |xtk , σ 2I). Our models, qMSE and 333 
+
+qMSE-AR , and the baseline models were trained to approximate the probabilistic forecasting distribution 334 
+
+p(xtk+1: N |xt1: k , y O ). See Appendix I for details about the datasets, parameters used for stochastic 335 
+
+interpolation and other implementation details. Our models, qMSE and qMSE-AR , were each trained 336 
+
+using mean squared error to learn their respective Bayes estimators. We used a non-autoregressive 337 
+
+FBGM trained with flow-matching and a conditional Gaussian chain trained for maximum likelihood 338 
+
+as our baselines. We trained each of these baselines in two ways to learn p(xtk+1: N |xt1: k , y O ). First, 339 
+
+we trained these baseline models to learn the latent distribution directly by learning directly from 340 
+
+samples from p(xt1: N |yτ1: N ). Second, we trained these models in the observation space to learn 341 
+
+p(yU |yO ) directly, and at test time, produced latent samples xtk+1: N by first sampling yU using yO ,342 
+
+and then sampling from the stochastic interpolator using the full sequence (yO , y U ). For all of the 343 
+
+autoregressive models, instead of learning the distribution of the first point p(xtk+1 |yO ), we produced 344 
+
+a heuristic sample by sampling from the stochastic interpolant that is only conditioned on yO . We 345 
+
+always chose tk+1 to be a time contained in O in order for this heuristic to give reasonable samples. 346 
+
+For each model, we trained using 5 different seeds and report the (empirical) negative log likelihood 347 
+
+and normalized root mean squared error of samples from the true distribution, p(xtk+1: N |yU ), using 348 
+
+32 sampled trajectories from each model, averaged over each dimension and time step. In all of our 349 
+
+models, we used a one layer recurrent neural network with a GRU cell as we found that this model 350 
+
+had sufficient model capacity to represent our data. Our results are displayed in Table 1. We can see 351 
+
+that the AR 352 
+
+## 5 Conclusion 353 
+
+We showed how to generalize the elements that comprise flow-based generative models to the 354 
+
+time series setting and uncovered a discrete time version of these models that shares convenient 355 
+
+properties that FBGMs possess, including a closed form solution and Bayes estimator parameters. 356 
+
+Our framework also encapsulates other existing time series models, including MSE based non-357 
+
+probabilistic forecasters and conditional Gaussian autoregressive models. This unified perspective 358 
+
+sheds light into the role that FBGMs can play in time series. 359 
+
+9References 360 
+
+Aditya Ramesh, Prafulla Dhariwal, Alex Nichol, Casey Chu, and Mark Chen. Hierarchical text-361 
+
+conditional image generation with clip latents. arXiv preprint arXiv:2204.06125 , 1(2):3, 2022. 362 
+
+Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe 363 
+
+Penna, and Robin Rombach. Sdxl: Improving latent diffusion models for high-resolution image 364 
+
+synthesis. arXiv preprint arXiv:2307.01952 , 2023. 365 
+
+Chitwan Saharia, William Chan, Saurabh Saxena, Lala Li, Jay Whang, Emily L Denton, Kamyar 366 
+
+Ghasemipour, Raphael Gontijo Lopes, Burcu Karagol Ayan, Tim Salimans, et al. Photorealistic 367 
+
+text-to-image diffusion models with deep language understanding. Advances in neural information 368 
+
+processing systems , 35:36479–36494, 2022. 369 
+
+Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances 370 
+
+in neural information processing systems , 34:8780–8794, 2021. 371 
+
+Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 ,372 
+
+2022. 373 
+
+Guan-Horng Liu, Yaron Lipman, Maximilian Nickel, Brian Karrer, Evangelos Theodorou, and Ricky 374 
+
+T. Q. Chen. Generalized schrödinger bridge matching. In The Twelfth International Conference on 375 
+
+Learning Representations , 2024. URL https://openreview.net/forum?id=SoismgeX7z .376 
+
+Carles Domingo-Enrich, Michal Drozdzal, Brian Karrer, and Ricky TQ Chen. Adjoint matching: 377 
+
+Fine-tuning flow and diffusion generative models with memoryless stochastic optimal control. 378 
+
+arXiv preprint arXiv:2409.08861 , 2024. 379 
+
+Aaron Havens, Benjamin Kurt Miller, Bing Yan, Carles Domingo-Enrich, Anuroop Sriram, Brandon 380 
+
+Wood, Daniel Levine, Bin Hu, Brandon Amos, Brian Karrer, et al. Adjoint sampling: Highly 381 
+
+scalable diffusion samplers via adjoint matching. arXiv preprint arXiv:2504.11713 , 2025. 382 
+
+Valentin De Bortoli, Guan-Horng Liu, Tianrong Chen, Evangelos A Theodorou, and Weilie Nie. 383 
+
+Augmented bridge matching. arXiv preprint arXiv:2311.06978 , 2023. 384 
+
+Yifan Chen, Mark Goldstein, Mengjian Hua, Michael S. Albergo, Nicholas M. Boffi, and Eric 385 
+
+Vanden-Eijnden. Probabilistic forecasting with stochastic interpolants and föllmer processes, 386 
+
+2024a. 387 
+
+Ella Tamir, Najwa Laabid, Markus Heinonen, Vikas Garg, and Arno Solin. Conditional flow matching 388 
+
+for time series modelling. In ICML 2024 Workshop on Structured Probabilistic Inference {\ &}389 
+
+Generative Modeling , 2024. 390 
+
+Byoungwoo Park, Hyungi Lee, and Juho Lee. Efficient modeling of irregular time-series with stochas-391 
+
+tic optimal control. In NeurIPS 2024 Workshop on Bayesian Decision-making and Uncertainty ,392 
+
+2024. URL https://openreview.net/forum?id=KRtuDGFJzu .393 
+
+Yu Chen, Marin Biloš, Sarthak Mittal, Wei Deng, Kashif Rasul, and Anderson Schneider. Recurrent 394 
+
+interpolants for probabilistic time series prediction. arXiv preprint arXiv:2409.11684 , 2024b. 395 
+
+Yiyuan Yang, Ming Jin, Haomin Wen, Chaoli Zhang, Yuxuan Liang, Lintao Ma, Yi Wang, Chenghao 396 
+
+Liu, Bin Yang, Zenglin Xu, et al. A survey on diffusion models for time series and spatio-temporal 397 
+
+data. arXiv preprint arXiv:2404.18886 , 2024. 398 
+
+Caspar Meijer and Lydia Y. Chen. The rise of diffusion models in time-series forecasting, 2024. 399 
+
+Michael Samuel Albergo and Eric Vanden-Eijnden. Building normalizing flows with stochastic 400 
+
+interpolants. In The Eleventh International Conference on Learning Representations , 2023. URL 401 
+
+https://arxiv.org/abs/2209.15571 .402 
+
+Yuyang Shi, Valentin De Bortoli, Andrew Campbell, and Arnaud Doucet. Diffusion schrödinger 403 
+
+bridge matching. Advances in Neural Information Processing Systems , 36, 2024. 404 
+
+Pascal Vincent. A connection between score matching and denoising autoencoders. Neural computa-405 
+
+tion , 23(7):1661–1674, 2011. 406 
+
+10 Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben 407 
+
+Poole. Score-based generative modeling through stochastic differential equations. In International 408 
+
+Conference on Learning Representations , 2021. URL https://openreview.net/forum?id= 409 
+
+PxTIG12RRHS .410 
+
+Edwin T Jaynes. Probability theory: The logic of science . Cambridge university press, 2003. 411 
+
+Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow 412 
+
+matching for generative modeling. In The Eleventh International Conference on Learning Repre-413 
+
+sentations , 2023. URL https://openreview.net/forum?id=PqvMRDCJT9t .414 
+
+Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate 415 
+
+and transfer data with rectified flow. In The Eleventh International Conference on Learning 416 
+
+Representations , 2023. URL https://openreview.net/forum?id=XVjTT1nw5z .417 
+
+Aram-Alexandre Pooladian, Heli Ben-Hamu, Carles Domingo-Enrich, Brandon Amos, Yaron 418 
+
+Lipman, and Ricky T. Q. Chen. Multisample flow matching: Straightening flows with mini-419 
+
+batch couplings. In International Conference on Machine Learning , 2023. URL https: 420 
+
+//api.semanticscholar.org/CorpusID:258418096 .421 
+
+John Lafferty, Andrew McCallum, Fernando Pereira, et al. Conditional random fields: Probabilistic 422 
+
+models for segmenting and labeling sequence data. In Icml , volume 1, page 3. Williamstown, MA, 423 
+
+2001. 424 
+
+Charles Sutton, Andrew McCallum, et al. An introduction to conditional random fields. Foundations 425 
+
+and Trends® in Machine Learning , 4(4):267–373, 2012. 426 
+
+Simo Särkkä and Arno Solin. Applied stochastic differential equations , volume 10. Cambridge 427 
+
+University Press, 2019. 428 
+
+Raghav Singhal, Mark Goldstein, and Rajesh Ranganath. Where to diffuse, how to diffuse, and how to 429 
+
+get back: Automated learning for multivariate diffusions. In The Eleventh International Conference 430 
+
+on Learning Representations , 2023. URL https://openreview.net/forum?id=osei3IzUia .431 
+
+Simo Särkkä et al. Recursive Bayesian inference on stochastic differential equations . Helsinki 432 
+
+University of Technology, 2006. 433 
+
+Syeda Sakira Hassan, Simo Särkkä, and Ángel F García-Fernández. Temporal parallelization of 434 
+
+inference in hidden markov models. IEEE Transactions on Signal Processing , 69:4875–4887, 435 
+
+2021. 436 
+
+Adrien Corenflos, Zheng Zhao, and Simo Särkkä. Gaussian process regression in logarithmic time. 437 
+
+arXiv preprint arXiv , 2102, 2021. 438 
+
+Jimmy T.H. Smith, Andrew Warrington, and Scott Linderman. Simplified state space layers for 439 
+
+sequence modeling. In The Eleventh International Conference on Learning Representations , 2023. 440 
+
+URL https://openreview.net/forum?id=Ai8Hw3AXqks .441 
+
+Calvin Luo. Understanding diffusion models: A unified perspective. arXiv preprint arXiv:2208.11970 ,442 
+
+2022. 443 
+
+Sander Dieleman. Perspectives on diffusion, 2023. URL https://sander.ai/2023/07/20/ 444 
+
+perspectives.html .445 
+
+Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised 446 
+
+learning using nonequilibrium thermodynamics. In International conference on machine learning ,447 
+
+pages 2256–2265. PMLR, 2015. 448 
+
+Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in 449 
+
+neural information processing systems , 33:6840–6851, 2020. 450 
+
+Tim Dockhorn, Arash Vahdat, and Karsten Kreis. Score-based generative modeling with critically-451 
+
+damped langevin diffusion. In International Conference on Learning Representations , 2022. URL 452 
+
+https://openreview.net/forum?id=CzceR82CYc .453 
+
+11 Tianrong Chen, Jiatao Gu, Laurent Dinh, Evangelos Theodorou, Joshua M. Susskind, and Shuangfei 454 
+
+Zhai. Generative modeling with phase stochastic bridge. In The Twelfth International Conference on 455 
+
+Learning Representations , 2024c. URL https://openreview.net/forum?id=tUtGjQEDd4 .456 
+
+Yaakov Bar-Shalom, X. Rong Li, and Thiagalingam Kirubarajan. Estimation with Applications 457 
+
+to Tracking and Navigation . John Wiley & Sons, New York, 2001. ISBN 9780471221272. 458 
+
+doi: 10.1002/0471221279. URL https://onlinelibrary.wiley.com/doi/book/10.1002/ 459 
+
+0471221279 .460 
+
+Diederik Kingma, Tim Salimans, Ben Poole, and Jonathan Ho. Variational diffusion models. Advances 461 
+
+in neural information processing systems , 34:21696–21707, 2021. 462 
+
+Marcel Kollovieh, Abdul Fatir Ansari, Michael Bohlke-Schneider, Jasper Zschiegner, Hao Wang, and 463 
+
+Yuyang Bernie Wang. Predict, refine, synthesize: Self-guiding diffusion models for probabilistic 464 
+
+time series forecasting. Advances in Neural Information Processing Systems , 36:28341–28364, 465 
+
+2023. 466 
+
+Xinyu Yuan and Yan Qiao. Diffusion-TS: Interpretable diffusion for general time series generation. 467 
+
+In The Twelfth International Conference on Learning Representations , 2024. URL https:// 468 
+
+openreview.net/forum?id=4h1apFjO99 .469 
+
+Marcel Kollovieh, Marten Lienen, David Lüdke, Leo Schwinn, and Stephan Günnemann. Flow 470 
+
+matching with gaussian process priors for probabilistic time series forecasting. In The Thirteenth 471 
+
+International Conference on Learning Representations , 2025. URL https://openreview.net/ 472 
+
+forum?id=uxVBbSlKQ4 .473 
+
+Yang Hu, Xiao Wang, Lirong Wu, Huatian Zhang, Stan Z Li, Sheng Wang, and Tianlong Chen. Fm-ts: 474 
+
+Flow matching for time series generation. arXiv preprint arXiv:2411.07506 , 2024. 475 
+
+Kashif Rasul, Calvin Seward, Ingmar Schuster, and Roland Vollgraf. Autoregressive denoising 476 
+
+diffusion models for multivariate probabilistic time series forecasting. In International Conference 477 
+
+on Machine Learning , pages 8857–8868. PMLR, 2021. 478 
+
+Macheng Shen and Chen Cheng. Neural sdes as a unified approach to continuous-domain sequence 479 
+
+modeling. arXiv preprint arXiv:2501.18871 , 2025. 480 
+
+Ahmed El-Gazzar and Marcel van Gerven. Probabilistic forecasting via autoregressive flow matching. 481 
+
+arXiv preprint arXiv:2503.10375 , 2025. 482 
+
+Matthew James Beal. Variational algorithms for approximate Bayesian inference . University of 483 
+
+London, University College London (United Kingdom), 2003. 484 
+
+Matthew James Johnson et al. Bayesian time series models and scalable inference . PhD thesis, 485 
+
+Massachusetts Institute of Technology, 2014. 486 
+
+Simo Särkkä and Ángel F García-Fernández. Temporal parallelization of bayesian smoothers. IEEE 487 
+
+Transactions on Automatic Control , 66(1):299–306, 2020. 488 
+
+Daphane Koller. Probabilistic Graphical Models: Principles and Techniques . The MIT Press, 2009. 489 
+
+Bernt Øksendal and Bernt Øksendal. Stochastic differential equations . Springer, 2003. 490 
+
+Rudolph Emil Kalman. A new approach to linear filtering and prediction problems. Transactions of 491 
+
+the ASME–Journal of Basic Engineering , 82(Series D):35–45, 1960. 492 
+
+H. E. Rauch, F. Tung, and C. T. Striebel. Maximum likelihood estimates of linear dynamic systems. 493 
+
+AIAA Journal , 3(8):1445–1450, 1965. 494 
+
+Emily Beth Fox. Bayesian nonparametric learning of complex dynamical phenomena . PhD thesis, 495 
+
+Massachusetts Institute of Technology, 2009. 496 
+
+Matthew Johnson and Scott Linderman. pylds: Bayesian inference for linear dynamical systems. 497 
+
+https://github.com/mattjj/pylds , 2015. Accessed: 2025-05-07. 498 
+
+12 A Appendix 499 
+
+The appendix contains proofs and implementation details for the main paper. It is organized as 500 
+
+follows: 501 
+
+1. Related work Appendix B 502 
+
+2. Background Appendix C 503 
+
+• Exponential family distributions Appendix C.1 504 
+
+• Mean field variational inference Appendix C.2 505 
+
+• Bayes estimation Appendix C.3 506 
+
+3. Message passing (D) 507 
+
+• Sequential message passing (D.1) 508 
+
+• Parallel message passing (D.2) 509 
+
+• Basic probabilistic queries (D.4) 510 
+
+4. Conditioned linear SDEs (E) 511 
+
+• Conditioned linear SDEs (E.1) 512 
+
+• Basic probabilistic queries (E.2) 513 
+
+• Corresponding probability flow ODE (E.3) 514 
+
+5. Constrained mean field VI (F) 515 
+
+• Derivation (F.1) 516 
+
+• Bayes estimator equivariance (F.2) 517 
+
+• CMFVI time series models (F.3) 518 
+
+6. Flow-based generative models (G) 519 
+
+• Score function of FBGMs (G.1) 520 
+
+• General form of Markovian projection SDE (G.2) 521 
+
+• General form of Markovian projection ODE (G.3) 522 
+
+7. Message passing implementation details (H) 523 
+
+• Numerical stability considerations (H.1) 524 
+
+• Message passing pseudocode (H.2) 525 
+
+8. Dataset details (I) 526 
+
+9. Model implementation details (J) 527 
+
+## B Related Work 528 
+
+There are numerous perspectives on flow-based generative models [Luo, 2022, Dieleman, 2023] and 529 
+
+even more variants of these models. At their core, these models start by constructing a stochastic 530 
+
+process that starts at a prior distribution and ends at the data distribution. Diffusion models use 531 
+
+progressive noising of data to build this map [Sohl-Dickstein et al., 2015, Ho et al., 2020, Song et al., 532 
+
+2021] via a simple SDE whose stationary distribution is Gaussian. On the other hand, flow-matching 533 
+
+models [Liu et al., 2023, Albergo and Vanden-Eijnden, 2023, Lipman et al., 2023] use a stochastic 534 
+
+bridge to build this map by conditioning a simple SDE to start at a point in the prior distribution and 535 
+
+end at the data distribution. The choice of simple SDE used in all of these models is a user-defined 536 
+
+choice that typically is a linear SDE, such as variance preserving SDE [Song et al., 2021], Brownian 537 
+
+motion, Ornstein-Uhlenbeck process, and others, due to their tractability as Gaussian processes 538 
+
+[Särkkä and Solin, 2019], and is even used to construct more exotic latent SDEs such as critically 539 
+
+damped langevin dynamics [Dockhorn et al., 2022, Chen et al., 2024c] or the Weiner velocity model 540 
+
+[Bar-Shalom et al., 2001, Särkkä et al., 2006]. In our paper, we abstract away these choices and 541 
+
+generally consider using linear SDEs to construct the initial map between distributions. There are a 542 
+
+few different ways to go from this initial stochastic process to a FBGM. A common way to construct 543 
+
+a FBGM from this is construct and optimize and ELBO for the likelihood of data under this initial 544 
+
+process [Kingma et al., 2021]. Alternatively, one can directly solve for the SDE whose marignal 545 
+
+distribution is that of this initial process [Song et al., 2021, Lipman et al., 2023] or define it as the 546 
+
+13 SDE whose path measure is as close as possible to the initial process [Shi et al., 2024, De Bortoli 547 
+
+et al., 2023] in terms of KL divergence, called the Markovian projection. We adopt the latter view 548 
+
+over the ELBO view because it explicitly constructs a solution to the generative modeling problem 549 
+
+and is available in closed form while this is hidden in the ELBO formulation and show that the 550 
+
+solution to a mean field variational inference problem can be seen as an approximate discrete time 551 
+
+counterpart. 552 
+
+Flow-based generative models have been successfully applied to time series problems in a non-553 
+
+autoregressive fashion [Kollovieh et al., 2023, Yuan and Qiao, 2024, Kollovieh et al., 2025, Hu 554 
+
+et al., 2024, Yang et al., 2024, Meijer and Chen, 2024]. These models transform the time series 555 
+
+generative modeling problem into the standard generative modeling problem used in image generation 556 
+
+by treating each time series as a single vector by concatenating all times together, and then learning a 557 
+
+map from a Gaussian vector of the same size to the data vector. These approaches can be conditioned 558 
+
+using guidance [Rasul et al., 2021, Dhariwal and Nichol, 2021, Ho and Salimans, 2022, Kollovieh 559 
+
+et al., 2023] which allows them to perform tasks such as forecasting and imputation. Our approach 560 
+
+differs from these in that we construct autoregressive models. 561 
+
+The class of models most relevant to our paper are autoregressive neural SDEs that are trained using 562 
+
+principles from flow-based generative models. [Chen et al., 2024a] uses a FÃ˝ ullmer process to model 563 
+
+the transition distributions of the distribution of time series data, which is the same approach that we 564 
+
+adopt in our Neural SDE model. [Park et al., 2024] also learns a similar latent Neural SDE model that 565 
+
+uses a similar form of soft conditioning as us (through the use of emission potentials), and is trained 566 
+
+to maximize the likelihood of data. [Tamir et al., 2024] is also similar where they perform stochastic 567 
+
+interpolation using Gaussian processes and perform inference with Kalman smoothing as well, which 568 
+
+is a form of message passing. Finally, [Shen and Cheng, 2025] learns a more general SDE to learn 569 
+
+the distribution of time series data where the diffusion coefficient is not independent of the current 570 
+
+state and also maximize the likelihood of data. These related papers are all related to the Neural 571 
+
+SDE that we describe in our paper. Our main contributions are centered around investigating how to 572 
+
+apply the approach used to construct these continuous time models for creating similar discrete time 573 
+
+models. [El-Gazzar and van Gerven, 2025] used flow matching to learn the next state distribution of 574 
+
+time series data, but did not learn a FÃ˝ ullmer process for this task and instead learned to transform a 575 
+
+Gaussian into the next state distribution. 576 
+
+## C Background 577 
+
+C.1 Exponential family distributions 578 
+
+Our findings can be most easily written using exponential family distributions. Although we restrict 579 
+
+our attention to Gaussian distributions, the form of our results are most readable in natural parameter 580 
+
+space. 581 
+
+Definition 3 (Exponential family distribution) . An probability distribution is in the exponential family 582 
+
+if its density function can be written in the following form: 583 
+
+p(x|θ) = exp {⟨ t(x), θ ⟩ − A(θ)} (20) 
+
+where t(x) is called the sufficient statistic, θ the natural parameter and A(θ) the partition function. 584 
+
+The member of this family that we will use is the multivariate Gaussian distribution. A multivariate 585 
+
+Gaussian with mean μ and covariance matrix Σ has the sufficient statistic t(x) = ( x, xx T ) and natural 586 
+
+parameters θ = ( − 12 Σ−1, Σ−1μ). In practice, it is more convenient to drop the − 12 scaling term and 587 
+
+work with the parameters (J, h ) = ( −Σ−1, Σ−1μ), where J is the precision matrix of the distribution. 588 
+
+While these are not exactly the natural parameters, we will refer to them as so. Throughout this paper, 589 
+
+we will work with unnormalized Gaussian distributions, which we call “Gaussian potentials”. We 590 
+
+use the notation ϕ(x|θ) to denote a Gaussian potential function over x with natural parameters θ. A 591 
+
+convenient property of the natural parameter form is that the score function takes a simple form. 592 
+
+∇ log ϕ(x|θ) = Jx − h (21) Another Gaussian distribution that we will use extensively is the Gaussian transition distribution. We 593 
+
+write ϕk+1 |k(xk+1 |xk) = N (xk+1 |Ax k + u, Σ) to denote the Gaussian transition distribution from 594 
+
+xk to xk+1 with state transition matrix A, bias vector u and covariance matrix Σ.595 
+
+14 C.2 Mean field variational inference 596 
+
+Mean field variational inference is an approximate inference algorithm for probabilistic models. It’s 597 
+
+main feature is that it’s solution is available in a simple closed form expression. Let p(x, θ ) be a joint 598 
+
+distribution over x and θ. The mean field variational problem is to find distributions, qx(x) and qθ (θ)599 
+
+that minimize the KL divergence between qx(x)qθ (θ) and p(x, θ ).600 
+
+Proposition 8 (Mean field variational inference for CRFs) . Let p(θ) be a distribution over θ, p(x|θ)601 
+
+be the CRF in Definition 1 and p(x, θ ) = p(θ)p(x|θ) be the joint distribution over x and θ. Then the 602 
+
+solutions to 603 
+
+argmin  
+
+> qx(x),q θ(θ)
+
+KL [ qx(x)qθ (θ)|p(x, θ )] (22) 
+
+will satisfy: 604 
+
+qx(x) ∝ exp {Eqθ (θ) [log p(x|θ)] } (23) 
+
+qθ (θ) ∝ exp {Eqx(x) [log p(θ|x)] } (24) See [Beal, 2003] for a proof. Typical use cases of mean field VI use tractable classes of distributions 605 
+
+for p(θ) and p(x|θ) so that one can perform EM style, alternating updates to obtain the optimal q606 
+
+distributions [Beal, 2003, Johnson et al., 2014]. However, in our setting, we will use mean field VI 607 
+
+differently. We will assume nothing about the form of p(θ), but will constrain the variational problem 608 
+
+by fixing qθ (θ) = p(θ).609 
+
+C.3 Bayes estimation 610 
+
+Lemma 1 (Bayes estimate of parameter) . Let p(z, θ ) be a joint distribution and let θ∗(z) be the 611 
+
+Bayes estimate of θ based on z under the squared error risk. Then the Bayes estimate takes the 612 
+
+following two forms: 613 
+
+θ∗(z) = Ep(θ|z)[θ] = argmin  
+
+> f(z)
+
+Ep(z,θ )
+
+∥f (z) − θ∥2 (25) 
+
+Proof. Let L[f ] be the loss function defined as follows: 614 
+
+L[f ] = Ep(z)
+
+∥f (z) − θ∗(z)∥2
+
+Clearly, the minimizer of L[f ] is θ∗(z). With a bit of rearranging and using Bayes rule, we can 615 
+
+rewrite L[f ] as follows: 616 
+
+L[f ] = Ep(z)
+
+∥f (z) − θ∗(z)∥2
+
+= Ep(z)
+
+∥f (z)∥2 − 2Ep(z) [⟨f (z), θ ∗(z)⟩] + Ep(z)
+
+∥θ∗(z)∥2| {z } 
+
+> const. w.r.t. f
+
+= Ep(z,θ )
+
+∥f (z)∥2 − 2Ep(z)
+
+⟨f (z), Ep(θ|z) [θ]⟩ + const. 
+
+= Ep(z,θ )
+
+∥f (z)∥2 − 2Ep(z,θ ) [⟨f (z), θ ⟩] + const. (complete the square) 
+
+= Ep(z,θ )
+
+∥f (z) − θ∥2 − Ep(z,θ )
+
+∥θ∥2| {z } 
+
+> const. w.r.t. f
+
++const. The minimizer of L[f ] is unaffected by the constant terms, and so we have that θ∗(z) = Ep(θ|z)[θ] is 617 
+
+the solution to 618 
+
+argmin  
+
+> f(z)
+
+Ep(z,θ )
+
+∥θ − f (z)∥2
+
+> 619
+
+15 D Message passing 620 
+
+In this section we will review message passing and identify the key operations that are needed to 621 
+
+perform message passing updates. We defer the discussion of numerically stable implementations of 622 
+
+these operations to Appendix H. First we’ll identify the key operations that are needed to perform 623 
+
+message passing updates for the backward messages and then show how these operations can be used 624 
+
+to perform message passing updates for the forward messages. 625 
+
+At a high level, the sequential and parallel message passing algorithms are variable elimination 626 
+
+algorithms that eliminate different variables of the chain structured graph. The sequential algorithms 627 
+
+operates on individual nodes and begins at one of the ends of the chain and sequentially eliminate 628 
+
+variable at the end of the chain, whereas the parallel algorithm operates on pairs of nodes and 629 
+
+eliminates the middle variable of the pair. For example, a rough sketch of the sequential elimination 630 
+
+process looks like (0) , 1, 2, 3, 4 → (1) , 2, 3, 4 → (2) , 3, 4 → (3) , 4 → (4) , where the parentheses 631 
+
+indicate the current node that is being processed. On the other hand, the parallel algorithm looks like 632 
+
+(0 , 1) , 2, 3, 4 → (0 , 2) , 3, 4 → (0 , 3) , 4 → (0 , 4) .633 
+
+D.1 Sequential message passing 634 
+
+The sequential message passing updates for the backward messages can be written using the following 635 
+
+recurrence relation: 636 
+
+ϕ(xk−1|βk−1) = 
+
+Z
+
+ϕk|k−1(xk|xk−1)ϕ(xk|θk)ϕ(xk|βk)dx k, βN = 0 (26) See Appendix H.3 for pseudocode. There are two operations on Gaussians that are needed to perform 637 
+
+these updates. The first is a “multiply” operation that takes two potential functions and returns a new 638 
+
+potential function, and the second is an “update” operation that absorbs a potential function into a 639 
+
+transition function. 640 
+
+Definition 4 (Multiply) . Let ϕ1(x) and ϕ2(x) be potential functions over the same variable. Then 641 
+
+the “multiply” operation is defined as 642 
+
+ϕ1(x)ϕ2(x) 7 → ˆϕ(x) (27) When ϕ1(x) and ϕ2(x) are parameterized using natural parameters, then the multiply operation simply 643 
+
+adds the natural parameters, i.e. if θ1 and θ2 are the natural parameters of ϕ1(x) and ϕ2(x), then 644 
+
+ϕ1(x|θ1)ϕ2(x|θ2) 7 → ϕ1(x|θ1 + θ2). We used this property to write the sequential message passing 645 
+
+updates for the backward messages ?? . We do note that when one uses a different parameterization, 646 
+
+the multiply operation may look different. We will examples of this in Appendix H. 647 
+
+The second operation is the “update” operation, which absorbs a potential function into a transition 648 
+
+function. This operation is what handles the integral in the recurrence relation. 649 
+
+Definition 5 (Update) . Let ϕ(y|x) be a transition function and ϕ(y) be a potential function over the 650 
+
+first variable. Then the “update” operation is defined as 651 
+
+ϕ(y)ϕy|x(y|x) 7 → ˆϕy|x(y|x) ˆϕ(x) (28) 
+
+where ˆϕy|x(y|x) and ˆϕ(x) are a new transition function and potential function, respectively. 652 
+
+Essentially, the update operation performs a change of variables of the coupling of x and y on the 653 
+
+LHS. Furthermore, when the terms of the LHS are Gaussian, then the terms of the RHS are also 654 
+
+Gaussian. This allows us to perform the update operation in closed form (see Appendix H). 655 
+
+The multiply and update operations are sufficient to perform the sequential message passing updates 656 
+
+for the backward messages. For example, the backward message passing updates can be written as: 657 
+
+Z
+
+ϕk|k−1(xk|xk−1) ϕ(xk|θk)ϕ(xk|βk)
+
+| {z }    
+
+> multiply →ϕ(xk|θk+βk)
+
+dx k (29) 
+
+=
+
+Z
+
+ϕ(xk|θk + βk)ϕk|k−1(xk|xk−1)
+
+| {z }   
+
+> update →ˆϕk|k−1(xk|xk−1)ϕ(xk−1|βk−1)
+
+dx k (30) 16 =
+
+Z
+
+ˆϕk|k−1(xk|xk−1)dx k
+
+| {z }
+
+> transition integrates to 1
+
+ϕ(xk−1|βk−1) (31) 
+
+= ϕ(xk−1|βk−1) (32) The forward messages can be computed in a similar manner. The forward messages are given by: 658 
+
+ϕ(xk+1 |αk+1 ) = 
+
+Z
+
+ϕk+1 |k(xk+1 |xk)ϕ(xk|θk)ϕ(xk|αk)dx k, α1 = 0 (33) To find the forward messages, we can exploit the fact that our transition functions are Gaussian and 659 
+
+can therefore be reversed. This means that given a transition ϕ(y|x), we can find a reversed transition 660 
+
+ϕT (x|y) that evaluates to the same value as ϕ(y|x) for all x, y 661 
+
+Definition 6 (Reversed transition) . Let ϕ(y|x) be a transition function. Then the reversed transition 662 
+
+is defined as 663 
+
+ϕT (x|y) = ϕ(y|x) (34) 
+
+so that ϕT (x|y) = ϕ(y|x) for all x, y and R ϕT (x|y)dx = R ϕ(y|x)dx = 1 .664 
+
+Using this reverse operation, we can simply reverse the transition distributions and then find the 665 
+
+forward messages by using the same recurrence relation as for the backward messages: 666 
+
+Z
+
+ϕk+1 |k(xk+1 |xk)
+
+| {z }
+
+> reverse
+
+ϕ(xk|θk)ϕ(xk|αk)
+
+| {z }    
+
+> multiply →ϕ(xk|θk+αk)
+
+dx k (35) 
+
+=
+
+Z
+
+ϕT (xk|xk+1 )ϕ(xk|θk + αk)
+
+| {z }    
+
+> update →ˆϕT(xk|xk+1 )ϕ(xk+1 |αk+1 )
+
+dx k (36) 
+
+=
+
+Z
+
+ˆϕT (xk|xk+1 )dx k
+
+| {z }
+
+> transition integrates to 1
+
+ϕ(xk+1 |αk+1 ) (37) 
+
+= ϕ(xk+1 |αk+1 ) (38) These message passing updates can be computed in O(N ) time using the the multiply, update and 667 
+
+reverse operations. However, there is a more efficient way to compute the forward messages using 668 
+
+the parallel scan algorithm [Särkkä and García-Fernández, 2020] that reduces the complexity to 669 
+
+O(log N ) on parallel compute. We will describe this algorithm in Appendix D.2. 670 
+
+D.2 Parallel message passing 671 
+
+In this section we will use slightly different notation to describe the parallel message passing 672 
+
+algorithm. We will avoid writing out the parameters of our potential functions and call them by their 673 
+
+parameter name. For example, instead of writing ϕ(xk|θk), we will write ϕk(xk) and instead of 674 
+
+writing ϕ(xk|βk), we will write β(xk).675 
+
+The building block of the parallel message passing algorithm Särkkä and García-Fernández [2020] is 676 
+
+an unnormalized potential function over two variables, which we denote by Ψ( y, x ). We assume that 677 
+
+Ψ( y, x ) can be decomposed into a (normalized) transition distribution and an unnormalized potential 678 
+
+function: 679 
+
+Ψ( y, x ) = Ψ( y|x)Ψ( x) (39) Whenever we write Ψ( y|x), we are referring to a valid conditional probability distribution 680 
+
+(R Ψ( y|x)dy = 1 ). Since Ψ( y, x ) is jointly Gaussian over x and y, we are able to integrate out 681 
+
+variables in x and y and can also combine neighboring potentials into a new Gaussian potential. 682 
+
+These properties allow us to construct a chain operation over potentials that combines neighboring 683 
+
+potentials and then integrates out the common variable. We denote this chain operation by ⊗:684 
+
+Ψ( y, x ) := 
+
+Z
+
+Ψ( y, z )Ψ( z, x )dz =: Ψ( y, z ) ⊗ Ψ( z, x ) (40) 17 An important property of the chain operation is that it is associative due to the fact that we can swap 685 
+
+the order or integration (we will prove this in Appendix D.3). 686 
+
+A useful perspective of this chain operation is that it amounts to performing variable elimination on 687 
+
+the graph defined by the potentials, i.e. performs some sort of message passing [Koller, 2009]. With 688 
+
+this in mind, we can perform message passing by constructing the appropriate joint potentials: 689 
+
+Proposition 9 (Parallel messages) . Let ϕk+1 |k and ϕk be the potential functions for the CRF in 690 
+
+Definition 1 and α and β be the messages defined in Eqs. (26) and (33) . Then 691 
+
+αk(xk) = 
+
+Z
+
+Ψfwd 
+
+> 1: k
+
+(xk, x 1)dx 1 and βk(xk) = 
+
+Z
+
+Ψbwd  
+
+> k:N
+
+(xN |xk)dx N (41) 
+
+where 692 
+
+Ψfwd 
+
+> 1: k
+
+(xk, x 1) = 
+
+> k−1
+
+O
+
+> i=1
+
+ϕi+1 |i(xi+1 |xi)ϕi(xi) (42) 
+
+and Ψbwd  
+
+> k:N
+
+(xN |xk) = 
+
+> k
+
+O 
+
+> i=N−1
+
+ϕi+1 |i(xi+1 |xi)ϕi+1 (xi+1 ) (43) See appendix Appendix D.3 for a proof and ?? for pseudocode. Since ⊗ is associative, we can 693 
+
+evaluate Eq. (42) in O(log N ) time using the parallel scan algorithm [Särkkä and García-Fernández, 694 
+
+2020]. The rough idea is that on parallel compute, one can, in parallel, chain together consecutive 695 
+
+pairs of potentials and then recurse on these new chained potentials in order to eventually chain the 696 
+
+entire sequence. We provide pseudocode for this a special case of this algorithm in Appendix H.3. 697 
+
+Ψfwd  
+
+> 1: k
+
+(xk, x 1) and Ψbwd  
+
+> k:N
+
+(xN |xk) can be thought of as the result of marginalization over the variables 698 
+
+between x1 and xk and xk and xN , respectively. 699 
+
+D.3 Chain operation 700 
+
+Recall that the chain operation is defined in Eq. (40) as 701 
+
+Ψ( y, x ) := 
+
+Z
+
+Ψ( y, z )Ψ( z, x )dz =: Ψ( y, z ) ⊗ Ψ( z, x ) (44) To see that it is associative, we need to check that Ψ( y, z ) ⊗ (Ψ( z, x ) ⊗ Ψ( x, w )) =702 
+
+(Ψ( y, z ) ⊗ Ψ( z, x )) ⊗ Ψ( x, w )703 
+
+Ψ( y, z ) ⊗ (Ψ( z, x ) ⊗ Ψ( x, w )) = 
+
+Z
+
+Ψ( y, z )
+
+ÅZ
+
+Ψ( z, x )Ψ( x, w )dx 
+
+ã
+
+dz (45) 
+
+=
+
+Z Z
+
+Ψ( y, z )Ψ( z, x )Ψ( x, w )dxdz (46) 
+
+=
+
+Z ÅZ
+
+Ψ( y, z )Ψ( z, x )dz 
+
+ã
+
+Ψ( x, w )dx (47) 
+
+= (Ψ( y, z ) ⊗ Ψ( z, x )) ⊗ Ψ( x, w ) (48) 
+
+Proposition 10 (Parallel messages) . Let ϕk+1 |k and ϕk be the potential functions for the CRF in 704 
+
+Definition 1 and α and β be the messages defined in Eqs. (26) and (33) . Then 705 
+
+αk(xk) = 
+
+Z
+
+Ψfwd 
+
+> 1: k
+
+(xk, x 1)dx 1 and βk(xk) = 
+
+Z
+
+Ψbwd  
+
+> k:N
+
+(xN |xk)dx N (49) 
+
+where 706 
+
+Ψfwd 
+
+> 1: k
+
+(xk, x 1) = 
+
+> k−1
+
+O
+
+> i=1
+
+ϕi+1 |i(xi+1 |xi)ϕi(xi) (50) 
+
+and Ψbwd  
+
+> k:N
+
+(xN |xk) = 
+
+> k
+
+O 
+
+> i=N−1
+
+ϕi+1 |i(xi+1 |xi)ϕi+1 (xi+1 ) (51) 18 Proof. First for notational clarity, define 707 
+
+Ψbwd 
+
+> i+1 ,i
+
+(xi+1 |xi) = ϕi+1 |i(xi+1 |xi)ϕi+1 (xi+1 ) and Ψfwd 
+
+> i+1 ,i
+
+(xi+1 , x i) = ϕi+1 |i(xi+1 |xi)ϕi(xi)
+
+(52) We can compute the cumulative potentials as follows: 708 
+
+Ψbwd  
+
+> k:N
+
+(xN |xk) = 
+
+> k
+
+O 
+
+> i=N−1
+
+Ψbwd 
+
+> i+1 ,i
+
+(xi+1 |xi) (53) 
+
+= Ψ bwd   
+
+> N:N−1
+
+(xN |xN −1) ⊗ Ψbwd   
+
+> N−1: N−2
+
+(xN −1|xN −2) ⊗ · · · ⊗ Ψbwd 
+
+> k+1: k
+
+(xk+1 |xk)
+
+(54) 
+
+=
+
+Z
+
+Ψbwd   
+
+> N:N−1
+
+(xN |xN −1)
+
+Z
+
+Ψbwd   
+
+> N−1: N−2
+
+(xN −1|xN −2)dx N −1
+
+Z
+
+Ψbwd   
+
+> N−2: N−3
+
+(xN −2|xN −3)dx N −2 · · · dx k+1 
+
+(55) 
+
+=
+
+Z
+
+· · · 
+
+Z N −1Y
+
+> i=k
+
+Ψbwd 
+
+> i:i+1
+
+(xi+1 |xi)dx N −1 · · · dx k+1 (56) And similarly for the forward potentials: 709 
+
+Ψfwd  
+
+> 1: k
+
+(xk, x 1) = 
+
+> k−1
+
+O
+
+> i=1
+
+Ψfwd 
+
+> i+1 ,i
+
+(xi+1 , x i) (57) 
+
+=
+
+Z
+
+· · · 
+
+Z k−1Y
+
+> i=1
+
+Ψfwd 
+
+> i+1 ,i
+
+(xi+1 , x i)dx 2 · · · dx k−1 (58) Next, we can rewrite the joint distribution of the CRF in a similar form: 710 
+
+p(x1: N ) =  
+
+> N−1
+
+Y
+
+> k=1
+
+ϕk+1 |k(xk+1 |xk)
+
+> N
+
+Y
+
+> k=1
+
+ϕk(xk) (59) 
+
+= ϕk(xk) 
+
+> N−1
+
+Y
+
+> i=k
+
+Ψbwd 
+
+> i+1 ,i
+
+(xi+1 |xi)
+
+> k−1
+
+Y
+
+> i=1
+
+Ψfwd 
+
+> i+1 ,i
+
+(xi+1 , x i), ∀k ∈ { 1, . . . , N } (60) Then, integrating over the variables dx 1, . . . , ˆdx k, . . . , dx N , where ˆdx k denotes that we are not 711 
+
+integrating over xk, completes the proof: 712 
+
+p(xk) = 
+
+Z
+
+· · · 
+
+Z
+
+p(x1: N )dx 1 . . . ˆdx k . . . dx N (61) 
+
+∝
+
+Z
+
+· · · 
+
+Z N −1Y
+
+> k=1
+
+ϕk+1 |k(xk+1 |xk)
+
+> N
+
+Y
+
+> k=1
+
+ϕk(xk)dx 1 . . . ˆdx k . . . dx N (62) 
+
+= ϕk(xk)
+
+Z
+
+· · · 
+
+Z N −1Y
+
+> i=k
+
+Ψbwd 
+
+> i+1 ,i
+
+(xi+1 |xi)
+
+> k
+
+Y
+
+> i=1
+
+Ψfwd 
+
+> i+1 ,i
+
+(xi+1 , x i)dx 1 . . . ˆdx k . . . dx N (63) 
+
+= ϕk(xk)
+
+Z
+
+Ψbwd  
+
+> k:N
+
+(xN |xk)dx N
+
+| {z }  
+
+> βk(xk)
+
+Z
+
+Ψfwd  
+
+> 1: k
+
+(xk, x 1)dx 1
+
+| {z }  
+
+> αk(xk)
+
+(64) We can recognize the terms in the last equation as the forward and backward messages, which 713 
+
+completes the proof. 714 
+
+It will be convenient later to define an operator that actually transforms the parameters of the backward 715 
+
+messages. 716 
+
+19 Definition 7 (Message passing update operator) . Let ϕk+1 |k(xk+1 , x k) be a Gaussian transition 717 
+
+function and let ϕ(xk+1 |ηk+1 ) be a Gaussian node potential with natural parameters ηk+1 . Next 718 
+
+consider the message passing update: 719 
+
+ϕ(xk|ηk) = 
+
+Z
+
+ϕk+1 |k(xk+1 |xk)ϕ(xk+1 |ηk+1 )dx k+1 (65) 
+
+The message passing update operator is denoted by Φk,k +1 (ηk+1 ) and is defined to satisfy: 720 
+
+ηk = Φ k,k +1 (ηk+1 ) (66) 
+
+In particular, the update rule for the backward messages is given by: 721 
+
+βk = Φ k,k +1 (βk+1 + θk+1 ) (67) 
+
+Corollary 2 (Mixed parameterization update rule) . Let ϕk+1 |k(xk+1 |xk) := N (xk+1 |Ax k +u, Σ) be 722 
+
+a Gaussian transition function and let ϕ(xk+1 |ηk+1 ) := N (xk+1 |μk+1 , J −1
+
+> k+1
+
+) be a Gaussian node 723 
+
+potential where Jk+1 is the precision matrix. If ηk and ηk+1 represent the mean and precision matrix 724 
+
+of a Gaussian distribution, then the update and marginalize operator is denoted by Φk,k +1 (ηk+1 )725 
+
+and is given by: 726 
+
+Φk,k +1 (μk+1 , J k+1 ) = ÄA−1(μk+1 − u), Φ(J)
+
+> k,k +1
+
+(Jk+1 )ä (68) 
+
+where Φ(J)
+
+> k,k +1
+
+(Jk+1 ) is a nonlinear function of Jk+1 .727 
+
+Proof. The result follows from Appendix H.3. 728 
+
+D.4 Probabilistic queries 729 
+
+The forward and backward messages can be used to compute the majority of the probabilistic queries 730 
+
+of interest on a CRF. Recall our definition of a CRF: 731 
+
+p(x1: N |θ) ∝ 
+
+> N−1
+
+Y
+
+> k=1
+
+ϕk+1 |k(xk+1 |xk)
+
+> N
+
+Y
+
+> k=1
+
+ϕ(xk|θk) (69) Next we will describe two probabilistic queries of interest: the marginal distribution and the transition 732 
+
+distribution. 733 
+
+Proposition 11 (Marginal distribution) .
+
+p(xk|θ) = ϕ(xk|θk + αk + βk) (70) 
+
+Proof. The derivation is given in Eq. (61). For completness, we will change notation: 734 
+
+p(xk) = ϕk(xk)βk(xk)αk(xk) (notation in previous section) (71) 
+
+:= ϕ(xk|θk)ϕ(xk|αk)ϕ(xk|βk) (notation in this section and in main text) (72) 
+
+= ϕ(xk|θk + αk + βk) (73) 
+
+> 735
+
+Proposition 12 (Transition distribution) .
+
+p(xk+1 |xk, θ ) ∝ ϕk+1 |k(xk+1 |xk)ϕ(xk+1 |θk+1 + βk+1 ) (74) 
+
+Proof. We can start by computing the joint distribution p(xk+1 , x k|θ). By using variable elimination, 736 
+
+we can show that 737 
+
+p(xk+1 , x k|θ) = ϕ(xk|αk)ϕk+1 |k(xk+1 |xk)ϕ(xk+1 |θk+1 )ϕ(xk+1 |βk+1 ) (75) Dividing by the marginal distribution p(xk|θ) and using the definition of the transition distribution, 738 
+
+we get 739 
+
+p(xk+1 |xk, θ ) = ϕk+1 |k(xk+1 |xk) ϕ(xk+1 |βk+1 + θk+1 )
+
+ϕ(xk|βk + θk) (76) which, after absorbing the denominator into the normalization constant, is equivalent to the desired 740 
+
+result. 741 
+
+20 Corollary 3 (Autoregressive factorization) . The autoregressive factorization of p(x1: N |θ) takes the 742 
+
+following form: 743 
+
+p(x1: N |θ) ∝ ϕ(x1|θ1 + β1)
+
+N −1Y
+
+k=1 
+
+ϕk+1 |k(xk+1 |xk)ϕ(xk+1 |θk+1 + βk+1 ) (77) 
+
+Proof. This follows directly from applying Proposition 11 and Proposition 12 to p(x1: N |θ) = 744 
+
+p(x1|θ) QN −1
+
+k=1 p(xk+1 |xk, θ ).745 
+
+## E Conditioned SDEs 746 
+
+In this section we derive the form of conditioned linear SDEs as well as the corresponding probability 747 
+
+flow ODEs. 748 
+
+E.1 Conditioned linear SDE 749 
+
+Proposition 13 (Conditioned Linear SDE) . Let ϕt+s|t(xt+s|xt) be the transition distribution of the 750 
+
+linear SDE dx t = Ftxtdt + LtdW t and let {ϕ(xtk |θtk )}tk ∈R be potential functions at times in the 751 
+
+set R. Then the piecewise-linear SDE, 752 
+
+dx t = ( Ftxt + LtLTt ∇ log ϕ(xt|βt)) dt + LtdW t, xt1 ∼ ϕ(xt1 |β1 + θ1) (78) 
+
+where t ∈ (tk, t k+1 ) and tk, t k+1 ∈ R , has a joint distribution over any superset of times t1: N =753 
+
+T ⊇ R that is given by a CRF: 754 
+
+p(xt1: N |θ) ∝ Y
+
+tk ∈T 
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y
+
+tk ∈R 
+
+ϕ(xtk |θtk ) (79) 
+
+where βt is the extension of the backward message defined in ?? to time t:755 
+
+ϕ(xt|βt) = 
+
+Z
+
+ϕtk+1 |t(xtk+1 |xt)ϕ(xtk+1 |θtk+1 + βtk+1 )dx tk+1 (80) 
+
+Proof. We will first construct the transition distribution of the conditioned SDE and then use Doob’s 756 
+
+h-transform to identify the form of the SDE. Recall that Doob’s h-transform ([Särkkä and Solin, 757 
+
+2019] section 7.5) is used to find the SDE associated with a transition distribution of the form 758 
+
+p(xt+s|xt) = ϕt+s|t(xt+s|xt) ht+s(xt+s)
+
+ht(xt) where ϕt+s|t(xt+s|xt) is the transition distribution of 759 
+
+a base SDE with the form dx t = utdt + LtdW t and ht is a function that satisfies ht(xt) = 760 R t+st ϕt+s|t(xt+s|xt)ht+s(xt+s)dx t+s. Then the SDE whose transition distribution is p(xt+s|xt) is 761 
+
+given by 762 
+
+dx t = ( ut + LtLTt ∇ log ht(xt)) dt + LtdW t (81) We will show that the backward messages of the CRF are of the form ht(xt) and then use Doob’s 763 
+
+h-transform to identify the form of the conditioned SDE. 764 
+
+Suppose t ∈ (tk, t k+1 ) and s > 0 is small enough so that t + s ∈ (tk, t k+1 ). Then we can construct 765 
+
+the joint distribution over (tt+s, t k+1 , . . . , t N ) given xt as 766 
+
+p(xt+s|xt) = 
+
+Z
+
+· · · 
+
+Z
+
+p(xtk+1: N , x t+s|xt)dx tk+1 · · · dx tN (82) 
+
+∝
+
+Z
+
+· · · 
+
+Z
+
+ϕ(xtk+1 |θtk+1 )
+
+Ñ N −1Y
+
+> i=k+1
+
+ϕti+1 |ti (xti+1 |xti )ϕ(xti+1 |θti+1 )
+
+é
+
+| {z }
+
+> integrate to get parallel bwd message (Proposition 9)
+
+ϕtk+1 |t+s(xtk+1 |xt+s)dx tk+1 · · · dx tN ϕt+s|t(xt+s|xt)
+
+(83) 
+
+=
+
+Z Z
+
+ϕ(xtk+1 |θtk+1 )Ψ bwd  
+
+> k+1: N
+
+(xtN |xtk+1 )ϕtk+1 |t+s(xtk+1 |xt+s)dx tN dx tk+1 ϕt+s|t(xt+s|xt) (84) 
+
+=
+
+Z
+
+ϕ(xtk+1 |θtk+1 )ϕ(xtk+1 |βtk+1 )ϕtk+1 |t+s(xtk+1 |xt+s)dx tk+1 
+
+| {z }
+
+> =: ϕ(xt+s|βt+s)
+
+ϕt+s|t(xt+s|xt) (85) 
+
+21 = ϕ(xt+s|βt+s)ϕt+s|t(xt+s|xt) (86) 
+
+We can find the normalizing constant by integrating over xt+s:767 
+
+Z
+
+ϕ(xt+s|βt+s)ϕt+s|t(xt+s|xt)dx t+s (87) 
+
+=
+
+Z Z
+
+ϕ(xtk+1 |θtk+1 )ϕ(xtk+1 |βtk+1 )ϕtk+1 |t+s(xtk+1 |xt+s)dx tk+1 ϕt+s|t(xt+s|xt)dx t+s (88) 
+
+=
+
+Z
+
+ϕ(xtk+1 |θtk+1 )ϕ(xtk+1 |βtk+1 )
+
+Z
+
+ϕtk+1 |t+s(xtk+1 |xt+s)ϕt+s|t(xt+s|xt)dx t+s
+
+| {z } 
+
+> ϕtk+1 |t(xtk+1 |xt)
+
+dx tk+1 (89) 
+
+=
+
+Z
+
+ϕ(xtk+1 |θtk+1 )ϕ(xtk+1 |βtk+1 )ϕtk+1 |t(xtk+1 |xt)dx tk+1 (90) 
+
+= ϕ(xt|βt) (91) Therefore, the transition distribution is 768 
+
+p(xt+s|xt) = ϕt+s|t(xt+s|xt) ϕ(xt+s|βt+s)
+
+ϕ(xt|βt) (92) Note that Eq. (87) also verifies that ϕ(xt|βt) satisfies the normalization condition for ht(xt) in Doob’s 769 
+
+h-transform. Directly applying Doob’s h-transform to the transition distribution in Eq. (82) identifies 770 
+
+the form of the conditioned SDE: 771 
+
+dx t = ( Ftxt + LtLTt ∇ log ϕ(xt|βt)) dt + LtdW t (93) This piecewise-linear SDE has the correct conditional distribution, p(xt|xtk1 ), but requires an initial 772 
+
+distribution. One can verify that the initial distribution p(xt1 ) ∝ ϕ(xt1 |θt1 + βt1 ) is the first marginal 773 
+
+distribution of the CRF in Definition 1. 774 
+
+E.2 Probabilistic queries for conditioned linear SDEs 775 
+
+Lemma 2 (Marignal distribution of conditioned SDE) . Suppose t ∈ (tk, t k+1 ) is a time in between 776 
+
+the inducing points tk and tk+1 of the conditioned linear SDE in Proposition 4. Then the marginal 777 
+
+distribution of the SDE at time t is given by 778 
+
+p(xt) = ϕ(xt|αt + βt) (94) 
+
+where αt and βt are extensions of the forward and backward messages defined in Eq. (33) and 779 
+
+Eq. (26) to time t:780 
+
+ϕ(xt|αt) = 
+
+Z
+
+ϕt|tk−1 (xt|xtk−1 )ϕ(xtk−1 |θtk−1 + αtk−1 )dx tk−1 (95) 
+
+and 781 
+
+ϕ(xt|βt) = 
+
+Z
+
+ϕt|tk+1 (xt|xtk+1 )ϕ(xtk+1 |θtk+1 + βtk+1 )dx tk+1 (96) 
+
+Proof. We can simply incorporate t into the set discretization times, t1: N , used in Proposition 4 to 782 
+
+get the desired result. Suppose t ∈ (ti, t i+1 ) for some i. Then we can write the joint distribution as 783 
+
+p(xt, x t1: N |θ) ∝ ϕti+1 |ti (xti+1 |xti )ϕt|ti (xt|xti ) Y 
+
+> tk∈T
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y 
+
+> tk∈R
+
+ϕ(xtk |θtk ) (97) Then we can run variable elimination on the ends of the chain until we are left with the marginal 784 
+
+distribution of xt:785 
+
+p(xt) = 
+
+Z
+
+p(xt, x t1: N |θ)dx t1: N (98) 
+
+=
+
+Z Z
+
+ϕ(xti |αti + θti )ϕt|ti (xt|xti )ϕti+1 |t(xti+1 |xt)ϕ(xti+1 |βti+1 + θti+1 )dx ti+1 dx ti
+
+(99) 22 =
+
+Z
+
+ϕ(xti |αti + θti )ϕt|ti (xt|xti )dx ti
+
+| {z }
+
+> ϕ(xt|αt)
+
+Z
+
+ϕti+1 |t(xti+1 |xt)ϕ(xti+1 |βti+1 + θti+1 )dx ti+1 
+
+| {z }
+
+> ϕ(xt|βt)
+
+(100) 
+
+= ϕ(xt|αt + βt) (101) 
+
+> 786
+
+Lemma 3 (Transition distribution of conditioned linear SDE) . Suppose t ∈ (tk, t k+1 ) is a time in 787 
+
+between the inducing points tk and tk+1 of the conditioned linear SDE in Proposition 4, and suppose 788 
+
+that s > 0 is small enough so that t + s ∈ (tk, t k+1 ). Then the transition distribution of the SDE at 789 
+
+time t is given by 790 
+
+ϕt+s|t(xt+s|xt) ∝ ϕt+s|t(xt+s|xt)ϕ(xt+s|βt+s) (102) 
+
+Proof. The proof is embedded in the derivation of the conditioned linear SDE at Eq. (92). 791 
+
+Corollary 4 (Autoregressive factorization) . The autoregressive factorization of p(xt1: N |θ) is given 792 
+
+by 793 
+
+p(xt1: N |θ) = p(xt1 |θ) Y 
+
+> tk∈T
+
+ϕtk |tk−1 (xtk |xtk−1 )ϕ(xtk |βtk ) (103) 
+
+where βtk =
+
+®Φtk ,t k+1 (βtk+1 + θtk+1 ) if tk ∈ R 
+
+Φtk ,t k+1 (βtk+1 ) otherwise (104) 
+
+where Φtk ,t k+1 is the message passing update operator defined in Definition 7. 794 
+
+Proof. Recall that 795 
+
+p(xt1: N |θ) ∝ Y 
+
+> tk∈T
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y 
+
+> tk∈R
+
+ϕ(xtk |θtk ) (105) Suppose that for each tk /∈ R , we introduce a new potential function whose natural parameters are 0,796 
+
+which we will denote by ϕ(xtk |∅ tk ). These new potentials have no effect on the joint distribution, 797 
+
+but allow us to rewrite the joint distribution in the same form as in Corollary 3, which yields the 798 
+
+result. 799 
+
+E.3 Probability flow ODE for conditioned linear SDEs 800 
+
+Corollary 5 (Probability flow ODE) . The probability flow ODE of the SDE in Proposition 4 is given 801 
+
+by 802 
+
+dx t
+
+dt = Ftxt + 12 LtLTt (∇ log ϕ(xt|βt) − ∇ log ϕ(xt|αt)) (106) 
+
+βt is the same as in Proposition 4 and αt is the extension of the forward message defined in Eq. (33) 803 
+
+to time t:804 
+
+ϕ(xt|αt) = 
+
+Z
+
+ϕt|tk (xt|xtk )ϕ(xtk |θtk + αtk )dx tk (107) 
+
+Proof. Let dx t = utdt + LtdW t be an SDE. Then the probability flow ODE is defined Song et al. 805 
+
+[2021] as 806 
+
+dx t
+
+dt = ut − 12 LtLTt ∇ log pt(xt) (108) where pt(xt) is defined as the marginal distribution of the SDE, which is given by Lemma 2. We can 807 
+
+apply this directly to our SDE in Proposition 4 to get the result: 808 
+
+dx t
+
+dt = ( Ftxt + LtLTt ∇ log ϕ(xt|βt)) − 12 LtLTt ∇ log pt(xt) (109) 
+
+= ( Ftxt + LtLTt ∇ log ϕ(xt|βt)) − 12 LtLTt (∇ log ϕ(xt|αt) + ∇ log ϕ(xt|βt)) (110) 
+
+= Ftxt + 12 LtLTt (∇ log ϕ(xt|βt) − ∇ log ϕ(xt|αt)) (111) 
+
+> 809
+
+23 F CMFVI proofs 810 
+
+F.1 Constrained mean field VI 811 
+
+Let θ ∼ p(θ) be an unknown prior distribution on the parameters of the conditional exponential 812 
+
+family distribution, p(x|z, θ ) ∝ exp {⟨ tz (x), θ ⟩ − A(z, θ )}, where tz (x) is the sufficient statistic 813 
+
+of the exponential family distribution and A(z, θ ) is the log partition function. In our setting, we 814 
+
+interpret x and z as unobserved and observed variables and θ as a a parameter that they both depend 815 
+
+on. We are interested in performing inference in the predictive distribution p(x|z), where we must 816 
+
+integrate out θ. This distribution can be written as: 817 
+
+p(x|z) = 
+
+Z
+
+p(x|z, θ )p(θ|z)dθ (112) 
+
+= Ep(θ|z) [exp {⟨ tz (x), θ ⟩ − A(z, θ )}] (113) where tz (x) is the sufficient statistic of the conditional exponential family distribution. Since this 818 
+
+distribution is intractable, we use a variational approximation to approximate it. Our variational 819 
+
+approximation is called the constrained mean field VI approximation and is given by: 820 
+
+q∗(x|z) = argmin 
+
+> q(x|z)
+
+KL [ q(x|z)p(θ|z)∥p(x, θ |z)] (114) In this appendix section we will derive facts about q∗(x|z).821 
+
+Lemma 4 (Alternate constrained mean field VI objectives) . The constrained mean field VI objective, 822 
+
+KL [ q(x|z)p(θ|z)∥p(x, θ |z)] (115) 
+
+is equal to the following expressions: 823 
+
+1. 
+
+Eq(x|z) p(θ|z)
+
+ï
+
+log p(θ|z)
+
+p(θ|x, z )
+
+ò
+
++ KL [ q(x|z)∥p(x|z)] (116) 
+
+2. 
+
+Eq(x|z) p(θ|z)
+
+ï
+
+log p(x|z)
+
+p(x|z, θ )
+
+ò
+
++ KL [ q(x|z)∥p(x|z)] (117) 
+
+3. 
+
+Eq(x|z)
+
+log q(x|z) − Ep(θ|z) [log p(x|z, θ )]  (118) 
+
+Proof. The proof is a straightforward rearrangement of terms: 824 
+
+KL [ q(x|z)p(θ|z)∥p(x, θ |z)] = 
+
+Z Z
+
+q(x|z)p(θ|z) log q(x|z)p(θ|z)
+
+p(x, θ |z) dxdy (119) 
+
+=
+
+Z Z
+
+q(x|z)p(θ|z) log p(θ|z)
+
+p(θ|x, z )
+
+q(x|z)
+
+p(x|z) dxdy (equals 1) (120) 
+
+=
+
+Z Z
+
+q(x|z)p(θ|z) log  p(x|z)
+
+p(x|z, θ )
+
+q(x|z)
+
+ p(x|z) dxdy (equals 2) (121) 
+
+=
+
+Z Z
+
+q(x|z)p(θ|z) log q(x|z)
+
+p(x|z, θ ) dxdy (122) 
+
+= Eq(x|z)
+
+log q(x|z) − Ep(θ|z) [log p(x|z, θ )]  (123) 
+
+> 825
+
+Theorem 2 (Constrained mean field VI solution) . Let p(x|z, θ ) ∝ exp {⟨ tz (x), θ ⟩ − A(z, θ )} be an 826 
+
+exponential family distribution and that θ ∼ p(θ|z). The constrained mean field VI approximation of 827 
+
+p(x|z), denoted by q∗(x|z), is defined as follows: 828 
+
+q∗(x|z) = argmin 
+
+> q(x|z)
+
+KL [ q(x|z)p(θ|z)∥p(x, θ |z)] (124) 
+
+= p(x|z, θ ∗(z)) , where θ∗(z) = Ep(θ|z) [θ] (125) 24 Proof. The proof can follow quickly from the standard mean field VI solutions Beal [2003], but for 829 
+
+completeness we will derive it from scratch. Starting from the result of Lemma 4, we have that 830 
+
+q∗(x|z) = argmin 
+
+> q(x|z)
+
+Eq(x|z)
+
+log q(x|z) − Ep(θ|z) [log p(x|z, θ )]  (126) We can introduce a Lagrange multiplier to enforce the constraint that the distribution is normalized. 831 
+
+Let qϵ(x|z) = q(x|z) + ϵη (x|z) where η is the variation function and ϵ is a scalar. Then we can take 832 
+
+a variation by differentiating with respect to ϵ:833 
+
+∂∂ϵ 
+
+Å
+
+Eqϵ(x|z)
+
+log qϵ(x|z) − Ep(θ|z) [log p(x|z, θ )]  + λ
+
+ÅZ
+
+qϵ(x|z)dx − 1
+
+ãã 
+
+= 0 (127) 
+
+=⇒ ∂∂ϵ 
+
+Z
+
+qϵ(x|z) log qϵ(x|z)dx +
+
+Z
+
+η(x|z)  Ep(θ|z) [log p(x|z, θ )] + λ dx = 0 (128) The negative entropy term simplies as follows: 834 
+
+∂∂ϵ 
+
+Z
+
+qϵ(x|z) log qϵ(x|z)dx =
+
+Z ∂∂ϵ qϵ(x|z) log qϵ(x|z)dx +
+
+Z
+
+qϵ(x|z) ∂∂ϵ log qϵ(x|z)dx (129) 
+
+=
+
+Z ∂q ϵ(x|z)
+
+∂ϵ log qϵ(x|z)dx +
+
+Z
+
+qϵ(x|z) ∂ log qϵ(x|z)
+
+∂ϵ dx (130) 
+
+=
+
+Z
+
+η(x|z) log qϵ(x|z)dx −
+
+Z
+
+qϵ(x|z) 1
+
+qϵ(x|z)
+
+∂q ϵ(x|z)
+
+∂ϵ dx (131) 
+
+=
+
+Z
+
+η(x|z) (log qϵ(x|z) − 1) dx (132) Plugging this back into the original equation and setting it equal to zero implies that the integrand 835 
+
+must be zero: 836 
+
+Ep(θ|z) [log p(x|z, θ )] + λ + log qϵ(x|z) − 1 = 0 (133) Solving for log qϵ(x|z) (and setting ϵ = 0 ) yields: 837 
+
+log q(x|z) = Ep(θ|z) [log p(x|z, θ )] + λ − 1 (134) The lagrange multiplier λ ensures that the distribution is normalized, and so we have that 838 
+
+q∗(x|z) = exp Ep(θ|z) [log p(x|z, θ )] + λ − 1 (135) 
+
+∝ exp Ep(θ|z) [log p(x|z, θ )] (136) 
+
+∝ exp ⟨tz (x), Ep(θ|z) [θ]⟩ (137) And so we can recognize that q∗(x|z) is in the same exponential family as p(x|z, θ ) but with natural 839 
+
+parameter Ep(θ|z) [θ]. This completes the proof. 840 
+
+Next, we emphasize another form of the CMFVI solution that is convenient when deriving CMFVI 841 
+
+solutions of other models. 842 
+
+Lemma 5 (Mean field form of CMFVI solution) . The CMFVI approximation of p(x|z) has the 843 
+
+following form: 844 
+
+q∗(x|z) ∝ exp Ep(θ|z) [log p(x|z, θ )] (138) 
+
+Proof. See Eq. (136) 845 
+
+Corollary 6 (Value of CMFVI objective at optimum) . The value of the CMFVI objective at the 846 
+
+optimum is given by: 847 
+
+KL [ q∗(x|z)p(θ|z)∥p(x, θ |z)] = Ep(θ|z) [A(z, θ )] − A(z, θ ∗(z)) (139) 
+
+where z is fixed, θ∗(z) = Ep(θ|z) [θ] and A(z, θ ) is the partition function of p(x|z, θ ).848 
+
+25 Proof. Let θ∗(z) = Ep(θ|z) [θ]. Recall that p(x|z, θ ) = exp {⟨ tz (x), θ ⟩ − A(z, θ )}, q∗(x|z) = 849 
+
+p(x|z, θ ∗(z)) and that the CMFVI objective can be written using an identity from Lemma 4: 850 
+
+KL [ q(x|z)p(θ|z)∥p(x, θ |z)] = Eq(x|z)
+
+log q(x|z) − Ep(θ|z) [log p(x|z, θ )]  (140) We can plug q∗(x|z) and p(x|z, θ ) into the identity to get: 851 
+
+KL [ q∗(x|z)p(θ|z)∥p(x, θ |z)] (141) 
+
+= Eq∗(x|z)
+
+log q∗(x|z) − Ep(θ|z) [log p(x|z, θ )]  (142) 
+
+= Eq∗(x|z)
+
+(⟨tz (x), θ ∗(z)⟩ − A(z, θ ∗(z))) −
+
+Ö
+
+⟨tz (x), Ep(θ|z) [θ]
+
+| {z }
+
+> θ∗(z)
+
+⟩ − Ep(θ|z) [A(z, θ )] 
+
+è
+
+(143) 
+
+= Ep(θ|z) [A(z, θ )] − A(z, θ ∗(z)) (144) 
+
+> 852
+
+Proposition 14 (Forward KL divergence) . The forward KL divergence between p(x|z) and q∗(x|z)853 
+
+is given by: 854 
+
+KL [ p(x|z)∥q∗(x|z)] = −Hp[x|z] − ⟨ t∗(z), θ ∗(z)⟩ + A(z, θ ∗(z)) (145) 
+
+where Hp[x|z] is the differential entropy of p(x|z), t∗(z) = Ep(x|z) [tz (x)] , θ∗(z) = Ep(θ|z) [θ] and 855 
+
+A(z, θ ) is the partition function of p(x|z, θ ).856 
+
+Proof. This follows from a direct computation: 857 
+
+KL [ p(x|z)∥q∗(x|z)] = −Hp[x|z] −
+
+Z
+
+p(x|z) log q∗(x|z)dx (146) 
+
+= −Hp[x|z] −
+
+Z
+
+p(x|z) ( ⟨tz (x), θ ∗(z)⟩ − A(z, θ ∗(z))) dx (147) 
+
+= −Hp[x|z] − ⟨ 
+
+Z
+
+p(x|z)tz (x)dx, θ ∗(z)⟩ + A(z, θ ∗(z)) (148) 
+
+= −Hp[x|z] − ⟨ t∗(z), θ ∗(z)⟩ + A(z, θ ∗(z)) (149) 
+
+> 858
+
+F.2 Bayes estimator equivariance 859 
+
+We will use the equivariance of the Bayes estimator to linear transformations to show that it is also 860 
+
+equivariant to message passing updates when the Gaussian potential functions of the corresponding 861 
+
+CRF have covariances that only depend on the node index. This result will allow us to reparameterize 862 
+
+the Bayes estimator of the backward messages in terms of the previously computed backward 863 
+
+messages, and also in terms of the potential function means themselves. This will be useful for 864 
+
+relating the CMFVI time series models we construct back traditional time series models, and also 865 
+
+for proving that the autoregressive CMFVI model we construct is an approximation of flow-based 866 
+
+generative models for time series. 867 
+
+Corollary 7 (Commutativity of Bayes estimator with update and marginalize opera-868 
+
+tor) . Let ϕk+1 |k(xk+1 |xk) be a Gaussian transition function and let ϕ(xk+1 |ηk+1 ) := 869 
+
+N (xk+1 |μk+1 (y), J −1
+
+> k+1
+
+) be a Gaussian node potential where y ∼ p(y) is an auxilary variable 870 
+
+set of variables that only the mean of the potential depends on. Then the Bayes estimator of ηk871 
+
+commutes with the update and marginalize operator. That is, 872 
+
+Ep(y)[ηk(y)] = Ep(y)[Φ k,k +1 (ηk+1 (y))] = Φ k,k +1 
+
+ Ep(y)[ηk+1 (y)]  (150) 
+
+Proof. We can examine the form of Φk,k +1 from Corollary 2 to see that Φk,k +1 is linear with respect 873 
+
+to μk+1 (y). Then the result follows from linearity equivariance of the Bayes estimator. 874 
+
+26 F.3 CMFVI time series models 875 
+
+Proposition 15 (Naive CMFVI solution) . Let p(xt1: N |yO ) be the target distribution. Then the naive 876 
+
+CMFVI solution, denoted by qCRF (xt1: N ) is the CMFVI approximation of p(xt1: N |yO ) and is given 877 
+
+by: 878 
+
+qCRF (xt1: N ) ∝ Y 
+
+> tk∈T
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y 
+
+> tk∈R
+
+ϕ(xtk |θ∗ 
+
+> tk
+
+(yO )) (151) 
+
+where θ∗ 
+
+> tk
+
+(yO ) = Ep(yU |yO ) [θtk (yτ1: T )] is the Bayes estimator of θtk .879 
+
+Proof. By expanding q∗ using Lemma 5, one finds that the terms of the log likelihood is linear with 880 
+
+respect to θtk (yτ1: T ). Then the result follows from the equivariance of the Bayes estimator to linear 881 
+
+transformations. 882 
+
+Proposition 16 (CMFVI transition approximation) . Let p(xt1: N |yO ) be the target distribution and 883 
+
+consider its k’th autoregressive factor p(xtk |xt1: k−1 , y O ). Then the CMFVI transition approximation 884 
+
+is given by: 885 
+
+qtransition (xtk |xt1: k−1 , y O ) ∝ ϕtk |tk−1 (xtk |xtk−1 )ϕ(xtk |β∗ 
+
+> tk
+
+(xt1: k−1 , y O )) (152) 
+
+where β∗ 
+
+> tk
+
+(xt1: k−1 , y O ) = Ep(yU |xt1: k−1 ,y O ) [βtk (yτ1: T )] is the Bayes estimate of βtk (yτ1: T ), which is 886 
+
+defined using the message passing update operator Φtk ,t k+1 from Definition 7 as: 887 
+
+βtk =
+
+®Φtk ,t k+1 (βtk+1 (yτ1: T ) + θtk+1 (yτ1: T )) if tk+1 ∈ R 
+
+Φtk ,t k+1 (βtk+1 (yτ1: T )) otherwise (153) 
+
+Proof. The transition distribution in the fully observed setting is given by: 888 
+
+p(xtk |xt1: k−1 , y τ1: T ) = p(xtk |xtk−1 , y τ1: T ) (154) 
+
+∝ ϕtk |tk−1 (xtk |xtk−1 )ϕ(xtk |βtk (yτ1: T )) (155) If we expand the log likelihood of p(xtk |xt1: k−1 , y τ1: T ), we would find that the log likelihood is linear 889 
+
+with respect to βtk (yτ1: T ), and so writing the CMFVI solution using Eq. (136) yields the result. 890 
+
+We denote this model by qMSE (xt1: N |yO ).891 
+
+Corollary 8 (MSE Forecaster) . Let p(xt1: N |yO ) be the target distribution and suppose the co-892 
+
+variances of its potentials are constant with respect to y. Then the MSE-CMFVI solution, de-893 
+
+noted by qMSE (xt1: N ) is the CMFVI approximation of p(xt1: N |yO ) obtained by choosing (x, z, θ ) = 894 
+
+(xt1: N , y O , θ (yτ1: T )) :895 
+
+qMSE (xt1: N |yO ) ∝ Y 
+
+> tk∈T
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y 
+
+> tk∈R
+
+N (xtk |μ∗ 
+
+> tk
+
+(yO ), Σtk ) (156) 
+
+where μ∗ 
+
+> tk
+
+(yO ) = Ep(yU |yO ) [μtk (yτ1: T )] is the Bayes estimate of μtk , and ϕ(xtk |θtk (yτ1: T )) = 896 
+
+N (xtk |μ∗ 
+
+> tk
+
+(yτ1: T ), Σtk ).897 
+
+See Appendix F.3 for a proof. 898 
+
+Definition 8 (Autoregressive CMFVI solution) . Let p(xt1: N |yO ) be the target distribution. Then the 899 
+
+autoregressive CMFVI solution, denoted by qAR (xt1: N ) is the CMFVI approximation of p(xt1: N |yO )900 
+
+and is given by: 901 
+
+qAR (xt1: N ) ∝ p(xt1 |yO ) Y 
+
+> tk∈T
+
+qtransition (xtk |xt1: k−1 , y O ) (157) 
+
+where qtransition (xtk |xt1: k−1 , y O ) is the CMFVI transition approximation given by Proposition 6. 902 
+
+Corollary 9 (MSE Forecaster) . Let p(xt1: N |yO ) be the target distribution and suppose the covari-903 
+
+ances of its potentials are constant with respect to y. Then the MSE-CMFVI solution, denoted by 904 
+
+qMSE (xt1: N ) is the CMFVI approximation of p(xt1: N |yO ) and is given by: 905 
+
+qMSE (xt1: N ) ∝ Y 
+
+> tk∈T
+
+ϕtk+1 |tk (xtk+1 |xtk ) Y 
+
+> tk∈R
+
+N (xtk |μ∗ 
+
+> tk
+
+(yO ), Σtk ) (158) 
+
+where μ∗ 
+
+> tk
+
+(yO ) = Ep(yU |yO ) [μtk (yτ1: T )] is the Bayes estimate of μtk .906 
+
+27 Proof. This follows from the fact that the potentials are constant with respect to y and the linear 907 
+
+equivariance of the Bayes estimator. 908 
+
+Corollary 10 (Autoregressive MSE Forecaster) . Let p(xt1: N |yO ) be the target distribution and 909 
+
+suppose the covariances of its potentials are constant with respect to y. Then the autoregressive 910 
+
+MSE-CMFVI solution, denoted by qAR-MSE (xt1: N ) is the CMFVI approximation of p(xt1: N |yO ) and is 911 
+
+given by: 912 
+
+qAR-MSE (xt1: N ) ∝ p(xt1 |yO ) Y 
+
+> tk∈T
+
+ϕtk |tk−1 (xtk |xtk−1 ) Y 
+
+> tk∈R
+
+N (xtk | Äμβtk
+
+ä∗
+
+(xt1: k , y O ), Σβtk ) (159) 
+
+where Äμβtk
+
+ä∗
+
+(xt1: k , y O ) = Ep(yU |xt1: k ,y O )
+
+îμβtk (yτ1: T )ó is the Bayes estimate of μβtk and Σβtk is the 913 
+
+covariance of the backward message of p(xt1: N |yτ1: T ).914 
+
+Proof. This follows from the fact that the potentials are constant with respect to y and the linear 915 
+
+equivariance of the Bayes estimator. 916 
+
+Definition 9 (Continuous extension of AR-MSE model) . Let qAR be the autoregressive CMFVI 917 
+
+solution and consider the setting where the potential functions of p(xt1: N |yτ1: T ) have covariances 918 
+
+that do not depend on y. Then the continuous extension of qAR is given by the following piecewise 919 
+
+linear SDE: 920 
+
+dx t = ( Ftxt + LtLTt ∇ log ϕ(xt|β∗ 
+
+> t
+
+(xt1: k , y O ))) dt + LtdW t, (160) 
+
+where β∗ 
+
+> t
+
+(xt1: k , y O ) = Ep(yU |xt1: k ,y O ) [βt(yτ1: T )] , and t ∈ (tk, t k+1 ) (161) 
+
+where β∗ 
+
+> t
+
+(xt1: k , y O ) is the Bayes estimator of βt(yτ1: T ) = Φ t,t k+1 (βtk+1 (yτ1: T )) .921 
+
+Proof. We just need to verify that this piecewise linear SDE has the same joint distribution as qAR 
+
+> 922
+
+on t1: N . To do this, we can just check that each of the linear SDEs that are defined on the intervals 923 
+
+(tk, t k+1 ) have the same joint distribution as qtransition (xtk |xt1: k−1 , y O ) from Proposition 6. This is 924 
+
+true by construction TODO: add proof. 925 
+
+## G Flow-based generative models proofs 926 
+
+In this section we provide basic results about Bayes estimation for generalized linear stochastic 927 
+
+interpolants. Let dx t = Ftxtdt + LtdW t be the base linear SDE and let the distribution of random 928 
+
+draws, at times t1: N , be denoted by p(xt1: N |c). Let p(xt1: N |θ, c ) be its conditional distribution given 929 
+
+parameters θ that are only available during training time and some extra conditioning information c930 
+
+that is avilable at both training and test time, and suppose that p(θ|c) is the (unknown) distribution of 931 
+
+θ given c. The goal of the techniques in this section (and FBGMs in general), is to construct, and 932 
+
+learn, the distribution of p(xt1: N |c), which is the distribution needed to generate samples of xt1: N
+
+> 933
+
+when we do not have access to the parameters θ. At a high level, FBGMs offer different inference 934 
+
+algroithms for this task. In this section, we will derive three of these inference algorithms. 935 
+
+G.1 Score function for FBGMs 936 
+
+Proposition 17 (Score function for FBGMs) . Suppose that p(θ|c) is a probability distribution 937 
+
+over θ given some extra conditioning information c and p(xt|θ, c ) is the marignal distribution of a 938 
+
+generalized linear stochastic interpolant whose base linear SDE is given by dx t = Ftxtdt + LtdW t.939 
+
+Then the score function of p(xt|c) is given by: 940 
+
+∇ log p(xt|c) = ∇ log ϕ(xt|α∗ 
+
+> t
+
+(xt, θ, c ) + β∗ 
+
+> t
+
+(xt, θ, c )) (162) 
+
+where α∗ 
+
+> t
+
+(xt, θ, c ) = Ep(θ|xt,c ) [αt(θ, c )] and β∗ 
+
+> t
+
+(xt, θ, c ) = Ep(θ|xt,c ) [βt(θ, c )] are Bayes estimators 941 
+
+of the forward and backward messages to time t using xt respectively. 942 
+
+Proof. A straightforward calculation will lead to the desired result. 943 
+
+∇ log p(xt|c) = 1
+
+p(xt|c) ∇p(xt|c) (163) 28 = 1
+
+p(xt|c) ∇
+
+Z
+
+p(θ|c)p(xt|θ, c )dθ (164) 
+
+= 1
+
+p(xt|c)
+
+Z
+
+p(θ|c)∇p(xt|θ, c )dθ (165) 
+
+=
+
+Z p(θ|c)p(xt|θ, c )
+
+p(xt|c) ∇ log p(xt|θ, c )dθ (166) 
+
+= Ep(θ|xt,c ) [∇ log p(xt|θ, c )] (167) 
+
+= Ep(θ|xt,c ) [∇ log ϕ(xt|αt(θ, c ) + βt(θ, c ))] ∵ Lemma 2 (168) 
+
+= ∇ log ϕ(xt|α∗ 
+
+> t
+
+(xt, θ, c ) + β∗ 
+
+> t
+
+(xt, θ, c )) ∵ Eq. (21) (169) 
+
+> 944
+
+G.2 General form of Markovian projection SDE 945 
+
+Lemma 6 (General form of Markovian projection SDE) . Suppose that p(θ|c) is a probability 946 
+
+distribution over θ given some extra conditioning information c and p(xt|θ, c ) is the marignal 947 
+
+distribution of a generalized linear stochastic interpolant whose base linear SDE is given by dx t =948 
+
+Ftxtdt + LtdW t. Then the Markovian projection SDE is given by: 949 
+
+dx t = ( Ftxt + LtLTt ∇ log ϕ(xt|β∗ 
+
+> t
+
+(xt, θ, c ))) dt + LtdW t (170) 
+
+where β∗ 
+
+> t
+
+(xt, θ, c ) = Ep(θ|xt,c ) [βt(θ, c )] is the Bayes estimate of the backward message to time t950 
+
+using xt.951 
+
+Proof. The Markovian projection SDE is the SDE whose marginal distribution evolves in time in 952 
+
+the same way that p(xt|c) evolves in time, and so our proof strategy will follow the same strategy 953 
+
+as [Lipman et al., 2023, Theorem 1] where we take the time derivative of p(xt|c) and recognize the 954 
+
+form of the SDE. 955 
+
+First, recall that the Fokker-Planck equation [Särkkä and Solin, 2019, Øksendal and Øksendal, 2003] 956 
+
+relates an SDE to the time derivative of its marginal distribution. Let p(xt|θ, c ) be the marginal 957 
+
+distribution of the generalized linear stochastic interpolant and recall that its corresponding SDE 958 
+
+is given by dx t = ( Ftxt + LtLTt ∇ log ϕ(xt|βt(θ, c ))) dt + LtdW t (see Proposition 4). Then the 959 
+
+Fokker-Planck equation for this SDE is given by: 960 
+
+∂p (xt|θ, c )
+
+∂t = −Div (p(xt|θ, c )( Ftxt + LtLTt ∇ log ϕ(xt|βt(θ, c )))) + 12 LtLTt Div (∇p(xt|θ, c )) 
+
+(171) 
+
+LtLTt appears outside the divergence operator because it does not depend on xt. Next, we can directly 961 
+
+take the time derivative of p(xt|c) and recognize the form of the corresponding SDE. 962 
+
+∂p (xt|c)
+
+∂t = Ep(θ|c)
+
+ï ∂p (xt|θ, c )
+
+∂t 
+
+ò
+
+(172) 
+
+= Ep(θ|c)
+
+ï
+
+−Div (p(xt|θ, c )( Ftxt + LtLTt ∇ log ϕ(xt|βt(θ, c )))) + 12 LtLTt Div (∇p(xt|θ, c )) 
+
+ò
+
+(173) 
+
+= Ep(θ|c) [−Div (p(xt|θ, c )Ftxt)] (A) (174) 
+
++ Ep(θ|c)
+
+−Div (p(xt|θ, c )LtLTt ∇ log ϕ(xt|βt(θ, c )))  (B) (175) 
+
++ Ep(θ|c)
+
+ï 12 LtLTt Div (∇p(xt|θ, c )) 
+
+ò
+
+(C) (176) Since all of the divergence and gradient operators depend only on xt, we can pass the expectation 963 
+
+through these terms. We can simplify each terms as follows: 964 
+
+(A) 
+
+Ep(θ|c) [−Div (p(xt|θ, c )Ftxt)] = −Div (p(xt|c)Ftxt) (177) 29 (B) 
+
+Ep(θ|c)
+
+−Div (p(xt|θ, c )LtLTt ∇ log ϕ(xt|βt(θ, c )))  = −Div (
+
+Z
+
+p(θ|c)p(xt|θ, c )LtLTt ∇ log ϕ(xt|βt(θ, c )) dθ )
+
+(178) 
+
+= −Div (
+
+Z
+
+p(θ|xt, c )p(xt|c)LtLTt ∇ log ϕ(xt|βt(θ, c )) dθ )
+
+(179) 
+
+= −Div (p(xt|c)LtLTt Ep(θ|xt,c ) [∇ log ϕ(xt|βt(θ, c ))]) 
+
+(180) 
+
+(C) 
+
+Ep(θ|c)
+
+ï 12 LtLTt Div (∇p(xt|θ, c )) 
+
+ò
+
+= 12 LtLTt Div (∇Ep(θ|c) [p(xt|θ, c )]) (181) 
+
+= 12 LtLTt Div (∇p(xt|c)) (182) Putting these terms back together, we get: 965 
+
+∂p (xt|c)
+
+∂t = −Div (p(xt|c)  Ftxt + LtLTt Ep(θ|xt,c ) [∇ log ϕ(xt|βt(θ, c ))] | {z }
+
+> recognize as drift term in Fokker-Planck equation
+
+) + 12 LtLTt Div (∇p(xt|c)) 
+
+(183) We can see that the form of the Markovian projection SDE is given by: 966 
+
+dx t =  Ftxt + LtLTt Ep(θ|xt,c ) [∇ log ϕ(xt|βt(θ, c ))]  dt + LtdW t (184) Lastly because ϕ(xt|βt(θ, c )) is a Gaussian distribution with natural parameters βt(θ, c ), its pdf is 967 
+
+given by: 968 
+
+ϕ(xt|βt(θ, c )) = exp {⟨ tc(xt), β t(θ, c )⟩ − A(c, θ )} (185) (186) where tc(xt) is the sufficient statistic of the Gaussian distribution and A(c, θ ) is the log partition 969 
+
+function. From this form, we can immediately see that the expectation around the score function 970 
+
+passes through to the natural parameters: 971 
+
+Ep(θ|xt,c ) [∇ log ϕ(xt|βt(θ, c ))] = ⟨∇ tc(xt), Ep(θ|xt,c ) [βt(θ, c )] ⟩ (187) If we let β∗ 
+
+> t
+
+(xt, θ, c ) = Ep(θ|xt,c ) [βt(θ, c )] and stop the gradient with respect to xt through β∗ 
+
+> t
+
+, then 972 
+
+we recover the desired result. 973 
+
+Proposition 18 (Neural latent SDE) . Let p(xt1: N , y 1: T ) be the joint distribution defined in Definition 2 974 
+
+and suppose that y = ( yO , y U ), where O and U are the times at which sequences are observed and 975 
+
+unobserved, respectively. Then the neural latent SDE is the following piecewise SDE defined on the 976 
+
+intervals (tk, t k+1 ) for k = 1 , . . . , N :977 
+
+dx t = ( Ftxt + LtLTt ∇ log ϕ(xt|β∗ 
+
+> t
+
+(xt, x t1: k , y O ))) dt + LtdW t, (188) 
+
+where β∗ 
+
+> t
+
+(xt, x t1: k , y O ) = Ep(yU |xt,x t1: k ,y O ) [βt(y1: T )] , and t ∈ (tk, t k+1 ) (189) 
+
+β∗ 
+
+> t
+
+(xt, x t1: k , y O ) is the Bayes estimator of βt using the current state xt.978 
+
+Proof. The result follows directly from Lemma 6 by choosing θ = yU and c = xt1: k .979 
+
+G.3 General form of Markovian projection ODE 980 
+
+Lemma 7 (General form of Markovian projection ODE) . Suppose that p(θ|c) is a probability 981 
+
+distribution over θ given some extra conditioning information c and p(xt|θ, c ) is the marignal 982 
+
+distribution of a generalized linear stochastic interpolant whose base linear SDE is given by dx t =983 
+
+Ftxtdt + LtdW t. Then the Markovian projection ODE is defined as the probability flow ODE of the 984 
+
+Markovian projection SDE and is given by: 985 
+
+dx t
+
+dt = Ftxt + 12 LtLTt (∇ log ϕ(xt|β∗ 
+
+> t
+
+(xt, θ, c )) − ∇ log ϕ(xt|α∗ 
+
+> t
+
+(xt, θ, c ))) (190) 
+
+where β∗ 
+
+> t
+
+(xt, θ, c ) = Ep(θ|xt,c ) [βt(θ, c )] and α∗ 
+
+> t
+
+(xt, θ, c ) = Ep(θ|xt,c ) [αt(θ, c )] are Bayes estimators 986 
+
+of the forward and backward messages to time t using xt respectively. 987 
+
+30 Proof. Recall that the definition of the probability flow ODE of an SDE of the form dx t = ut(xt)dt +988 
+
+LtdW t is given by [Song et al., 2021]: 989 
+
+dx t
+
+dt = ut(xt) − 12 LtLTt ∇ log p(xt|c) (191) Plugging in drift of the Markovian projection SDE in Lemma 6, and the score function of p(xt|c) in 990 
+
+Proposition 17, we get the desired result. 991 
+
+## H Message Passing Implementation Details 992 
+
+We devise a careful implementation of message passing to ensure numerical stability. There are many 993 
+
+different ways to implement message passing. For example, [Särkkä et al., 2006] parameterizes the 994 
+
+potentials in the standard form of Gaussians and uses Kalman filtering [Kalman, 1960] to obtain 995 
+
+the forward messages and does not directly compute the backward messages, but instead uses the 996 
+
+Rauch-Tung-Striebel smoother [Rauch et al., 1965] to blend the forward and backward message 997 
+
+computations to obtain the smoothed potentials. Alternatively, [Fox, 2009, Johnson and Linderman, 998 
+
+2015] utilize a natural parameterization of the potentials in order to have simple message passing 999 
+
+updates. Our implementation requires that we can express both total uncertainty, and total certainty, 1000 
+
+in a variable in order to be able to work with incomplete, or missing data, and to condition exactly 1001 
+
+on variables. To do this, we adopt a mixed parametrization that contains the mean of the Gaussian 1002 
+
+and precision matrix so that we can express total uncertainty using a precision matrix of 0 and total 1003 
+
+certainty in the mean value by using a symbolic infinity. We also use symbolic zeros to mitigate 1004 
+
+accumulation of errors when perform message passing on long chains of latent variables without any 1005 
+
+evidence. 1006 
+
+H.1 Numerical stability considerations 1007 
+
+Before we look at the implementation details, we will look at what considerations we need to make 1008 
+
+for the implementation of these operations in a numerically stable way. Recall that the transition 1009 
+
+distribution of an LTI-SDE is given by 1010 
+
+ϕ(xt+s|xt) = N (xt+s|Asxt, Σs) (192) where 1011 
+
+ïAs ΣsA−Ts
+
+0 A−Ts
+
+ò
+
+:= exp {
+
+ïF LL T
+
+0 −F T
+
+ò
+
+s} (193) and that potential functions can be written in natural or standard form as: 1012 
+
+ϕ(x) = exp {− 12 xT Jx + xT h − log Z} (194) 
+
+= exp {− 12 xT Σ−1x + xT Σ−1μ − log Z} (195) where Σ = J−1 and μ = J−1h. We assume that the time intervals between consecutive variables 1013 
+
+are bounded and nonzero so that Σs, As, and A−Ts are numerically stable. We also assume that the 1014 
+
+covariance matrices that the user specifies for the node potentials, e.g. Σ or J, are well conditioned. 1015 
+
+We do not assume that Σ−1 
+
+> s
+
+, Σ−1 nor J−1 are well conditioned. These assumptions are made to 1016 
+
+accomodate operations that a user might perform in practice. For example, a user may choose to 1017 
+
+express 0 certainty in a variable by setting Σ → ∞ or J = 0 and can choose to express 0 uncertainty 1018 
+
+by setting Σ = 0 or J → ∞ . Furthermore, if a user chooses to discretize an SDE at points where 1019 
+
+s is small, or even exactly 0, then Σs is close to 0 and so Σ−1 
+
+> s
+
+can be very large. To account 1020 
+
+for these considerations, we use symbolic computation to represent matrices that are 0 or ∞ as 1021 
+
+needed. Furthermore, we use three different parameterizations of the Gaussian to ensure that we 1022 
+
+can handle all cases. We use the standard parameterization, (μ, Σ) , natural parameterization 3,1023 
+
+(J = Σ −1, h = Σ −1μ), and mixed parameterization (J = Σ −1, μ ). For brevity, we will not include 1024 
+
+the updates for the normalizing constant log Z in our pseudocode. 1025 
+
+> 3
+
+The true natural parameters are scaled by − 12
+
+31 H.2 Message passing pseudocode 1026 
+
+In Appendix D we identified the key operations that are needed to perform variable elimination in the 1027 
+
+sequential and parallel settings (see Appendices D.1 and D.2). These operations are: 1028 
+
+1. An “add” operation adds the parameters of two potential functions together (code in Ap-1029 
+
+pendix H.3). 1030 
+
+2. An “update” operation that absorbs a potential function into a transition function (defined in 1031 
+
+Definition 5 and code in Appendix H.3). 1032 
+
+3. A “marginalize” operation that marginalizes out a variable from a Gaussian joint distribution. 1033 
+
+In practice, we fuse this with the “update” operation (code in Appendix H.3). 1034 
+
+4. A “reverse” operation that reverses the direction of a transition (code in Appendix H.3). 1035 
+
+5. A “chain” operation that chains two transition functions (defined in Eq. (40) and code in 1036 
+
+Appendix H.3). 1037 
+
+In Appendix H.3, Appendix H.3, Appendix H.3, and Appendix H.3 we provide pseudocode for 1038 
+
+message passing that involves these operations. 1039 
+
+H.3 Update rules 1040 
+
+Now we provide pseudocode for the update rules. 
+
+Algorithm 1 Add 
+
+1. Require: potential functions ϕ1 and ϕ2
+
+2. (J1, h 1) = to_natural (ϕ1)
+
+3. (J2, h 2) = to_natural (ϕ2)
+
+4. Return from_natural (( J1 + J2, h 1 + h2)) 
+
+> 1041
+
+Algorithm 2 Update 
+
+1. Require: potential function ϕ and transition ϕk+1 |k
+
+2. (J, μ ) = to_mixed (ϕ)
+
+3. (A, u, Σ) = ϕk+1 |k
+
+4. R = J(I + Σ J)−1
+
+5. S = Σ R
+
+6. T = I − S
+
+7. ¯ϕk+1 |k = ( T A, T u + Sμ, T Σ) 
+
+8. ¯ϕ = from_mixed (( AT RT A, A −1(μ − u))) 
+
+9. Ψk+1 ,k = ( ¯ϕk+1 |k, ¯ϕ)
+
+10. Return Ψk+1 ,k 
+
+Algorithm 3 Update and marginalize 
+
+1. Require: potential function ϕ and transition ϕk+1 |k
+
+2. (_, ¯ϕ) = Update (ϕ, ϕ k+1 |k)
+
+3. Return ¯ϕ
+
+32 Algorithm 4 Reverse 
+
+1. Require: transition ϕk+1 |k
+
+2. (A, u, Σ) = ϕk+1 |k
+
+3. ¯A = A−1
+
+4. ¯u = −A−1u
+
+5. ¯Σ = A−1ΣA−T
+
+6. Return ( ¯A, ¯u, ¯Σ) 
+
+Algorithm 5 Chain 
+
+1. Require: transition functions ϕk|k−1 and ϕk+1 |k
+
+2. Ak, u k, Σk = ϕk+1 |k
+
+3. Ak−1, u k−1, Σk−1 = ϕk|k−1
+
+4. A = AkAk−1
+
+5. u = Akuk−1 + uk
+
+6. Σ = Σ k + AkΣk−1ATk
+
+7. Return (A, u, Σ) 
+
+Algorithm 6 BackwardMessagePassing 
+
+1. Require (ϕ2|1, . . . , ϕ N |N −1) and (ϕ1, . . . , ϕ N )
+
+2. Initialize βN = 0 
+
+3. For k = N, . . . , 2:(a) Ψk,k −1 = Update (ϕk|k−1, ϕ k + βk)
+
+(b) βk−1 = Marginalize (Ψ k,k −1)
+
+4. Return (β1, . . . , β N )
+
+Algorithm 7 ParallelBackwardMessagePassing 
+
+1. Require (ϕ2|1, . . . , ϕ N |N −1) and (ϕ1, . . . , ϕ N )
+
+2. In parallel, for k = N, . . . , 2:(a) Ψk,k −1 = Update (ϕk|k−1, ϕ k)
+
+3. (Ψ 1: N , . . . , ΨN −1: N ) = AssociativeScan (Chain , Ψ2,1, . . . , ΨN,N −1)
+
+4. In parallel, for k = N − 1, . . . , 1:(a) βk = Marginalize (Ψ k:N )
+
+5. βN = 0 
+
+6. Return (β1, . . . , β N )
+
+33 Algorithm 8 ForwardMessagePassing 
+
+1. Require (ϕ2|1, . . . , ϕ N |N −1), (ϕ1, . . . , ϕ N ) and use_parallel 
+
+2. For k = 1 , . . . , N − 1:(a) ϕk|k+1 = Reverse (ϕk+1 |k)
+
+3. If use_parallel :(a) MessagePassing = ParallelBackwardMessagePassing 
+
+4. Else: (a) MessagePassing = BackwardMessagePassing 
+
+5. (αN , . . . , α 1) = MessagePassing (( ϕN −1|N , . . . , ϕ 1|2), (ϕN , . . . , ϕ 1)) 
+
+6. Return (α1, . . . , α N )
+
+Algorithm 9 AssociativeScan (Even number of elements only) 1. Require: operator ⊕, elements (t1, t 2, . . . , t n) where n is a power of 2 2. If n == 1 :(a) Return t1
+
+3. In parallel, for k = 1 , . . . , n/ 2:(a) pk = t2k−1 ⊕ t2k
+
+4. (r2, r 4, . . . , r n) = AssociativeScan (⊕, (p1, p 2, . . . , p n/ 2)) 
+
+5. In parallel, for k = 1 , . . . , n/ 2 − 1:(a) r2k+1 = r2k ⊕ t2k+1 
+
+6. r1 = t1
+
+7. Return (r1, r 2, . . . , r n)
+
+## I Dataset details 1042 
+
+We used two synthetic datasets and five real-world datasets for our experiments - a synthetic noisy 1043 
+
+double pendulum and synthetic sine wave datasets, and real world datasets for modeling stocks, 1044 
+
+energy, etth, mujoco, and fmri datasets. For all of our experiments, we use an 80/10/10 split for the 1045 
+
+training, validation, and test sets. We adopted two different approaches to generate these splits, one 1046 
+
+for then the dataset only containd a single time series, and one for when the dataset containd multiple 1047 
+
+time series. For datasets that only contain a single time series, such as the noisy double pendulum, 1048 
+
+stocks, etth and fmri datasets, we split our data into training, validation, and test sets by splitting the 1049 
+
+series into three contiguous segments for the training, validation, and test sets respectively, using 1050 
+
+the 80/10/10 split, and then construct windowed batches of a fixed length for each of the training, 1051 
+
+validation, and test sets. 1052 
+
+## J Model implementation details 1053 
+
+J.1 Neural network architecture and training details 1054 
+
+To ensure a fair comparison, we use nearly the exact same neural network architectures and training 1055 
+
+procedures for all of the models. The architecture that we use is an encoder-decoder transformer 1056 
+
+architecture where each transformer has 10 layers, 32 heads and a hidden dimension of 128. In 1057 
+
+between each transformer layer we use a Wavenet convolution block that has 256 channels and 1058 
+
+uses a kernel size of 4. The observed sequence of variables is passed through the encoder and 1059 
+
+then used to condition the decoder as it processes the currently generated sequence. We did not 1060 
+
+do extensive architecture tuning and chose this model early on because it performed well enough 1061 
+
+for our experiments. We incorporated information about the times in each series by constructing 1062 
+
+34 a feature vector for each scalar time and concatenating it with the observed sequence of variables 1063 
+
+before passing the contatenation to the transformer. For the models that needed to be autoregressive, 1064 
+
+we used causal convolutions and causal attention masks to ensure that the Jacobian matrix of the 1065 
+
+model was lower triangular. See our code for full details. 1066 
+
+Each of our models were trained on a single 2080ti GPU using a learning rate of 10 −4 using the 1067 
+
+adamw optimizer, linear warmup of 1000 steps, and an effictive batch size of 256 (we used a batch 1068 
+
+size of 64 and 4 gradient accumulation steps). For each experiment, we used 5 random seeds to 1069 
+
+initialize the model parameters and to split the data into training, validation, and test sets using an 1070 
+
+80/10/10 split. We evaluated the objective function on the entire validation set every 1000 gradient 1071 
+
+updates and stopped training when the value of the objective function over the entire validation set 1072 
+
+stopped improving for 5 evaluations. We normalized the elements of each series by subtracting the 1073 
+
+mean and dividing by the standard deviation of the first, observed variable in the series to ensure that 1074 
+
+the elements of each series were on a similar scale. 1075 
+
+J.2 Model details 1076 
+
+We implemented 8 different models, of which 6 are latent space forecasters and 2 are observation 1077 
+
+space forecasters. The baseline, observation space models, were trained to model p(yk+1: N |y1: k)1078 
+
+while the latent space models were trained to model p(x1: N |y1: k). Of the latent space forecasters, 1079 
+
+4 are CMFVI based models and while the last 2 are the same baseline models that we used for the 1080 
+
+observation space models, just trained on the latent process instead of the observed process. 1081 
+
+1. Baselines probabilistic forecasters (Trained to approximate p(yk+1: N |y1: k)): 1082 
+
+(a) Conditional Gaussian autoregressive model 1083 
+
+(b) Diffusion model 1084 
+
+2. Latent probabilistic forecasters (Trained to approximate p(x1: N |y1: k)): 1085 
+
+(a) CMFVI models: 1086 
+
+i. MSE forecaster 1087 
+
+ii. Autoregressive MSE forecaster 1088 
+
+iii. Neural ODE 1089 
+
+iv. Neural SDE 1090 
+
+(b) Conditional gaussian autoregressive 1091 
+
+(c) Diffusion model 1092 
+
+The encoder networks in each model accept as input y1: k and output a context embedding that is 1093 
+
+used to condition the decoder. The decoder accepts as input a sequence of variables that are currently 1094 
+
+being generated and outputs a sequence of different quantities whose interpretation depends on the 1095 
+
+model. Next, we will describe each of the models that we implemented, what their decoder outputs 1096 
+
+are, what their training objective is, and how they generate samples. 1097 
+
+Conditional Gaussian autoregressive model The Gaussian conditional chains parameterize the 1098 
+
+distribution of the next variable in the sequence as a Gaussian distribution. The decoder transformer 1099 
+
+network outputs the mean and covariance of the next distribution for the entire sequence of generated 1100 
+
+variables at once. Since the decoder is autoregressive, the mean and covariance of the next distribution 1101 
+
+is found at the same position as the most recently generated variable. For the latent space model, the 1102 
+
+first variable is sampled from a CRF, of the same kind used to construct the latent process, that is 1103 
+
+conditioned on the observed variables. The model is trained to maximize the log likelihood of the 1104 
+
+unobserved sequence given the observed sequence. 1105 
+
+Diffusion model The diffusion model is trained using flow-matching [Lipman et al., 2023] using 1106 
+
+a brownian bridge between a Gaussian random variable and the sequence of unobserved variables. 1107 
+
+This model is effectively the same as standard diffusion models for images, but applied to a flattened 1108 
+
+time series vector. The decoder transformer network outputs the vector field of the probability flow 1109 
+
+ODE that is used to simulate the process. Samples are generated by passing a sequence of Gaussian 1110 
+
+random variables of the same size as yk+1: N to an ODE solver that uses the vector field output by 1111 
+
+the decoder to simulate the process. 1112 
+
+35 MSE forecaster The MSE forecaster predicts the mean of the potential functions of the CRF used 1113 
+
+to construct the latent process. This model is trained to minimize the mean squared error between 1114 
+
+the predicted mean of each potential function, and the mean of the potential function of the target 1115 
+
+process. To generate samples from this model, we use the input y1: k to generate the means of the 1116 
+
+CRF potentials for the entire sequence of generated variables. We then sample from the CRF defined 1117 
+
+by these potentials to get a sample from this model. 1118 
+
+Autoregressive MSE forecaster This model is also a conditional Gaussian autoregressive model, 1119 
+
+except that the model only parameterizes the mean of each transition distribution, and not the 1120 
+
+covariance, because, as mentioned in (REF), when the covariance matrices of the potential functions 1121 
+
+do not depend on the values of y, then the covariance matrices are known analytically using Kalman 1122 
+
+smoothing. To train this model, we minimize the mean squared error between the means of the 1123 
+
+true transition distributions (using the entire observed sequence), p(xi+1 |xi, y1: N ), and the mean 1124 
+
+predicted by our model for q(xi+1 |xi, y1: k). We generate samples from this model using the same 1125 
+
+procedure as the one for the conditional Gaussian autoregressive model defined above. 1126 
+
+Neural ODE/SDE We designed a novel parameterization of neural process models based on flow-1127 
+
+based generative models in order to be able to use the same autoregressive transformer architecture 1128 
+
+as the other models, and also to make these scalable during training. Recall that a single step of 1129 
+
+training a flow-based generative model requires constructing a stochastic bridge between samples 1130 
+
+from a source and target distribution, sampling a random time in between the source and target time, 1131 
+
+sampling from the stochastic bridge at this time and then computing the probability flow ODE vector 1132 
+
+(or drift) of the bridge at this time. To extend this to time series, we must be able to perform this 1133 
+
+procedure for every pair of consecutive time points in a time series. To this end, we construct our 1134 
+
+transformer decoder to take as input the latent sequence that we are generating at the fixed set of times 1135 
+
+T := {t1, . . . , t N } and also elements of the latent sequence at (uniformly) random times inbetween 1136 
+
+these times, compute both the predicted and true control (either probability flow ODE vector or drift 1137 
+
+vector) at both the original and new times, and then return the mean squared error between the two. 1138 
+
+More formally, at training time suppose that we uniformly sample times in between the times 1139 
+
+in T as τi ∼ U(ti, t i+1 ) for i = 1, . . . , N − 1. Then we can sample from the stochas-1140 
+
+tic bridge at these times to get a sample from the model, xT +τ ∼ p(xT +τ |y1: N ), where 1141 
+
+xT +τ := ( xt1 , x τ1 , x t2 , x τ2 , . . . , x τN −1 , x tN ). Our decoder transformer network takes as input 1142 
+
+xT +τ and the embedding of y1: k from the encoder and outputs the probability flow ODE vector 1143 
+
+(if we are training a neural ODE) or the drift vector (if we are training a neural SDE) at the times 1144 
+
+T + τ . Our conditioned linear SDE library allows us to efficiently sample from p(xT +τ |y1: N ), as 1145 
+
+well as compute the target control vector for the samples. We then compute the mean squared error 1146 
+
+between the predicted control vector and the target control vector to get our loss function. Since we 1147 
+
+ensure that our decoder network is autoregressive, we are able to compute the loss for the drift for the 1148 
+
+entire sequence at once, rather than having to compute for a single time step as is the case in existing 1149 
+
+implementations of these kinds of models (CITE). 1150 
+
+Our sample generation procedure simulates and ODE/SDE where the control vector at time t is given 1151 
+
+by the k’th element of the decoder output, where t ∈ (tk, t k+1 ). To begin, we first sample an initial 1152 
+
+point from pCRF (xt0 |y1: k). Note that this distribution is not equal to the target p(xt0 |y1: k), but is a 1153 
+
+reasonable approximation if k is reasonably large. Then we sample a set of times, τ , in between the 1154 
+
+times in T , like we do during training, to hold the intermediate variables that we store in order to 1155 
+
+feed the neural network an input that looks similar to the one used during training. The sampling 1156 
+
+procedure can be broken down into a sequence of k steps, where at step k ∈ [0 , N ), we simulate 1157 
+
+the variable xtk forward in time from time t = tk, t k+1 to predict the next element of the sequence, 1158 
+
+xtk+1 . At the first step, we initialize the buffer of 2N − 1 elements (xt0 , 0, . . . , 0) . Then for each 1159 
+
+step k ∈ [0 , N ), we simulate the variable xtk forward in time from time t = tk−1, t k to predict the 1160 
+
+next element of the sequence, xtk . The control of this simulation process is computed by passing 1161 
+
+the current buffer of variables to the decoder network. During simulation, we record the value of 1162 
+
+the process at the time, τk, so that at the end of step k, we update the buffer to include both xτk and 1163 
+
+xtk+1 . We then repeat this process for each step k ∈ [0 , N ) to get a sample from the model. See ?? 1164 
+
+for a discussion on the performance of this sampling procedure. 1165 
+
+36 NeurIPS Paper Checklist 1166 
+
+The checklist is designed to encourage best practices for responsible machine learning research, 1167 
+
+addressing issues of reproducibility, transparency, research ethics, and societal impact. Do not remove 1168 
+
+the checklist: The papers not including the checklist will be desk rejected. The checklist should 1169 
+
+follow the references and follow the (optional) supplemental material. The checklist does NOT count 1170 
+
+towards the page limit. 1171 
+
+Please read the checklist guidelines carefully for information on how to answer these questions. For 1172 
+
+each question in the checklist: 1173 
+
+• You should answer [Yes] , [No] , or [NA] . 1174 
+
+• [NA] means either that the question is Not Applicable for that particular paper or the 1175 
+
+relevant information is Not Available. 1176 
+
+• Please provide a short (1-2 sentence) justification right after your answer (even for NA). 1177 
+
+The checklist answers are an integral part of your paper submission. They are visible to the 1178 
+
+reviewers, area chairs, senior area chairs, and ethics reviewers. You will be asked to also include it 1179 
+
+(after eventual revisions) with the final version of your paper, and its final version will be published 1180 
+
+with the paper. 1181 
+
+The reviewers of your paper will be asked to use the checklist as one of the factors in their evaluation. 1182 
+
+While "[Yes] " is generally preferable to "[No] ", it is perfectly acceptable to answer "[No] " provided a 1183 
+
+proper justification is given (e.g., "error bars are not reported because it would be too computationally 1184 
+
+expensive" or "we were unable to find the license for the dataset we used"). In general, answering 1185 
+
+"[No] " or "[NA] " is not grounds for rejection. While the questions are phrased in a binary way, we 1186 
+
+acknowledge that the true answer is often more nuanced, so please just use your best judgment and 1187 
+
+write a justification to elaborate. All supporting evidence can appear either in the main paper or the 1188 
+
+supplemental material, provided in appendix. If you answer [Yes] to a question, in the justification 1189 
+
+please point to the section(s) where related material for the question can be found. 1190 
+
+1. Claims 1191 
+
+Question: Do the main claims made in the abstract and introduction accurately reflect the 1192 
+
+paper’s contributions and scope? 1193 
+
+Answer: [Yes] 1194 
+
+Justification: We introduced a generalization of the key elements of flow-based generative 1195 
+
+models that are relevant to the time series setting and showed how this can be used to 1196 
+
+construct related discrete time models. 1197 
+
+Guidelines: 1198 
+
+• The answer NA means that the abstract and introduction do not include the claims 1199 
+
+made in the paper. 1200 
+
+• The abstract and/or introduction should clearly state the claims made, including the 1201 
+
+contributions made in the paper and important assumptions and limitations. A No or 1202 
+
+NA answer to this question will not be perceived well by the reviewers. 1203 
+
+• The claims made should match theoretical and experimental results, and reflect how 1204 
+
+much the results can be expected to generalize to other settings. 1205 
+
+• It is fine to include aspirational goals as motivation as long as it is clear that these goals 1206 
+
+are not attained by the paper. 1207 
+
+2. Limitations 1208 
+
+Question: Does the paper discuss the limitations of the work performed by the authors? 1209 
+
+Answer: [Yes] 1210 
+
+Justification: In section 3.4 and 3.6 we explained how the class of models we introduced are 1211 
+
+ultimately just mean squared error based conditional Gaussian models and therefore may 1212 
+
+not work as well in practice as their maximum likelihood counterparts on more stochastic 1213 
+
+data. 1214 
+
+Guidelines: 1215 
+
+37 • The answer NA means that the paper has no limitation while the answer No means that 1216 
+
+the paper has limitations, but those are not discussed in the paper. 1217 
+
+• The authors are encouraged to create a separate "Limitations" section in their paper. 1218 
+
+• The paper should point out any strong assumptions and how robust the results are to 1219 
+
+violations of these assumptions (e.g., independence assumptions, noiseless settings, 1220 
+
+model well-specification, asymptotic approximations only holding locally). The authors 1221 
+
+should reflect on how these assumptions might be violated in practice and what the 1222 
+
+implications would be. 1223 
+
+• The authors should reflect on the scope of the claims made, e.g., if the approach was 1224 
+
+only tested on a few datasets or with a few runs. In general, empirical results often 1225 
+
+depend on implicit assumptions, which should be articulated. 1226 
+
+• The authors should reflect on the factors that influence the performance of the approach. 1227 
+
+For example, a facial recognition algorithm may perform poorly when image resolution 1228 
+
+is low or images are taken in low lighting. Or a speech-to-text system might not be 1229 
+
+used reliably to provide closed captions for online lectures because it fails to handle 1230 
+
+technical jargon. 1231 
+
+• The authors should discuss the computational efficiency of the proposed algorithms 1232 
+
+and how they scale with dataset size. 1233 
+
+• If applicable, the authors should discuss possible limitations of their approach to 1234 
+
+address problems of privacy and fairness. 1235 
+
+• While the authors might fear that complete honesty about limitations might be used by 1236 
+
+reviewers as grounds for rejection, a worse outcome might be that reviewers discover 1237 
+
+limitations that aren’t acknowledged in the paper. The authors should use their best 1238 
+
+judgment and recognize that individual actions in favor of transparency play an impor-1239 
+
+tant role in developing norms that preserve the integrity of the community. Reviewers 1240 
+
+will be specifically instructed to not penalize honesty concerning limitations. 1241 
+
+3. Theory assumptions and proofs 1242 
+
+Question: For each theoretical result, does the paper provide the full set of assumptions and 1243 
+
+a complete (and correct) proof? 1244 
+
+Answer: [Yes] 1245 
+
+Justification: We provide all of our proofs in the appendix. 1246 
+
+Guidelines: 1247 
+
+• The answer NA means that the paper does not include theoretical results. 1248 
+
+• All the theorems, formulas, and proofs in the paper should be numbered and cross-1249 
+
+referenced. 1250 
+
+• All assumptions should be clearly stated or referenced in the statement of any theorems. 1251 
+
+• The proofs can either appear in the main paper or the supplemental material, but if 1252 
+
+they appear in the supplemental material, the authors are encouraged to provide a short 1253 
+
+proof sketch to provide intuition. 1254 
+
+• Inversely, any informal proof provided in the core of the paper should be complemented 1255 
+
+by formal proofs provided in appendix or supplemental material. 1256 
+
+• Theorems and Lemmas that the proof relies upon should be properly referenced. 1257 
+
+4. Experimental result reproducibility 1258 
+
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-1259 
+
+perimental results of the paper to the extent that it affects the main claims and/or conclusions 1260 
+
+of the paper (regardless of whether the code and data are provided or not)? 1261 
+
+Answer: [Yes] 1262 
+
+Justification: We provide all of our implementation details in the appendix and provide our 1263 
+
+code as supplementary material. 1264 
+
+Guidelines: 1265 
+
+• The answer NA means that the paper does not include experiments. 1266 
+
+• If the paper includes experiments, a No answer to this question will not be perceived 1267 
+
+well by the reviewers: Making the paper reproducible is important, regardless of 1268 
+
+whether the code and data are provided or not. 1269 
+
+38 • If the contribution is a dataset and/or model, the authors should describe the steps taken 1270 
+
+to make their results reproducible or verifiable. 1271 
+
+• Depending on the contribution, reproducibility can be accomplished in various ways. 1272 
+
+For example, if the contribution is a novel architecture, describing the architecture fully 1273 
+
+might suffice, or if the contribution is a specific model and empirical evaluation, it may 1274 
+
+be necessary to either make it possible for others to replicate the model with the same 1275 
+
+dataset, or provide access to the model. In general. releasing code and data is often 1276 
+
+one good way to accomplish this, but reproducibility can also be provided via detailed 1277 
+
+instructions for how to replicate the results, access to a hosted model (e.g., in the case 1278 
+
+of a large language model), releasing of a model checkpoint, or other means that are 1279 
+
+appropriate to the research performed. 1280 
+
+• While NeurIPS does not require releasing code, the conference does require all submis-1281 
+
+sions to provide some reasonable avenue for reproducibility, which may depend on the 1282 
+
+nature of the contribution. For example 1283 
+
+(a) If the contribution is primarily a new algorithm, the paper should make it clear how 1284 
+
+to reproduce that algorithm. 1285 
+
+(b) If the contribution is primarily a new model architecture, the paper should describe 1286 
+
+the architecture clearly and fully. 1287 
+
+(c) If the contribution is a new model (e.g., a large language model), then there should 1288 
+
+either be a way to access this model for reproducing the results or a way to reproduce 1289 
+
+the model (e.g., with an open-source dataset or instructions for how to construct 1290 
+
+the dataset). 1291 
+
+(d) We recognize that reproducibility may be tricky in some cases, in which case 1292 
+
+authors are welcome to describe the particular way they provide for reproducibility. 1293 
+
+In the case of closed-source models, it may be that access to the model is limited in 1294 
+
+some way (e.g., to registered users), but it should be possible for other researchers 1295 
+
+to have some path to reproducing or verifying the results. 1296 
+
+5. Open access to data and code 1297 
+
+Question: Does the paper provide open access to the data and code, with sufficient instruc-1298 
+
+tions to faithfully reproduce the main experimental results, as described in supplemental 1299 
+
+material? 1300 
+
+Answer: [Yes] 1301 
+
+Justification: We include our code as supplementary material. 1302 
+
+Guidelines: 1303 
+
+• The answer NA means that paper does not include experiments requiring code. 1304 
+
+• Please see the NeurIPS code and data submission guidelines ( https://nips.cc/ 1305 
+
+public/guides/CodeSubmissionPolicy ) for more details. 1306 
+
+• While we encourage the release of code and data, we understand that this might not be 1307 
+
+possible, so â ˘ AIJNoâ ˘ A˙ I is an acceptable answer. Papers cannot be rejected simply for 1308 
+
+not including code, unless this is central to the contribution (e.g., for a new open-source 1309 
+
+benchmark). 1310 
+
+• The instructions should contain the exact command and environment needed to run to 1311 
+
+reproduce the results. See the NeurIPS code and data submission guidelines ( https: 1312 
+
+//nips.cc/public/guides/CodeSubmissionPolicy ) for more details. 1313 
+
+• The authors should provide instructions on data access and preparation, including how 1314 
+
+to access the raw data, preprocessed data, intermediate data, and generated data, etc. 1315 
+
+• The authors should provide scripts to reproduce all experimental results for the new 1316 
+
+proposed method and baselines. If only a subset of experiments are reproducible, they 1317 
+
+should state which ones are omitted from the script and why. 1318 
+
+• At submission time, to preserve anonymity, the authors should release anonymized 1319 
+
+versions (if applicable). 1320 
+
+• Providing as much information as possible in supplemental material (appended to the 1321 
+
+paper) is recommended, but including URLs to data and code is permitted. 1322 
+
+6. Experimental setting/details 1323 
+
+39 Question: Does the paper specify all the training and test details (e.g., data splits, hyper-1324 
+
+parameters, how they were chosen, type of optimizer, etc.) necessary to understand the 1325 
+
+results? 1326 
+
+Answer: [Yes] 1327 
+
+Justification: We explain our experimental setting in the experiments section 1328 
+
+Guidelines: 1329 
+
+• The answer NA means that the paper does not include experiments. 1330 
+
+• The experimental setting should be presented in the core of the paper to a level of detail 1331 
+
+that is necessary to appreciate the results and make sense of them. 1332 
+
+• The full details can be provided either with the code, in appendix, or as supplemental 1333 
+
+material. 1334 
+
+7. Experiment statistical significance 1335 
+
+Question: Does the paper report error bars suitably and correctly defined or other appropriate 1336 
+
+information about the statistical significance of the experiments? 1337 
+
+Answer: [Yes] 1338 
+
+Justification: We provide the mean and standard error for the models trained in our experi-1339 
+
+ments. 1340 
+
+Guidelines: 1341 
+
+• The answer NA means that the paper does not include experiments. 1342 
+
+• The authors should answer "Yes" if the results are accompanied by error bars, confi-1343 
+
+dence intervals, or statistical significance tests, at least for the experiments that support 1344 
+
+the main claims of the paper. 1345 
+
+• The factors of variability that the error bars are capturing should be clearly stated (for 1346 
+
+example, train/test split, initialization, random drawing of some parameter, or overall 1347 
+
+run with given experimental conditions). 1348 
+
+• The method for calculating the error bars should be explained (closed form formula, 1349 
+
+call to a library function, bootstrap, etc.) 1350 
+
+• The assumptions made should be given (e.g., Normally distributed errors). 1351 
+
+• It should be clear whether the error bar is the standard deviation or the standard error 1352 
+
+of the mean. 1353 
+
+• It is OK to report 1-sigma error bars, but one should state it. The authors should 1354 
+
+preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis 1355 
+
+of Normality of errors is not verified. 1356 
+
+• For asymmetric distributions, the authors should be careful not to show in tables or 1357 
+
+figures symmetric error bars that would yield results that are out of range (e.g. negative 1358 
+
+error rates). 1359 
+
+• If error bars are reported in tables or plots, The authors should explain in the text how 1360 
+
+they were calculated and reference the corresponding figures or tables in the text. 1361 
+
+8. Experiments compute resources 1362 
+
+Question: For each experiment, does the paper provide sufficient information on the com-1363 
+
+puter resources (type of compute workers, memory, time of execution) needed to reproduce 1364 
+
+the experiments? 1365 
+
+Answer: [Yes] 1366 
+
+Justification: We provide these details in the appendix. 1367 
+
+Guidelines: 1368 
+
+• The answer NA means that the paper does not include experiments. 1369 
+
+• The paper should indicate the type of compute workers CPU or GPU, internal cluster, 1370 
+
+or cloud provider, including relevant memory and storage. 1371 
+
+• The paper should provide the amount of compute required for each of the individual 1372 
+
+experimental runs as well as estimate the total compute. 1373 
+
+40 • The paper should disclose whether the full research project required more compute 1374 
+
+than the experiments reported in the paper (e.g., preliminary or failed experiments that 1375 
+
+didn’t make it into the paper). 1376 
+
+9. Code of ethics 1377 
+
+Question: Does the research conducted in the paper conform, in every respect, with the 1378 
+
+NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?1379 
+
+Answer: [Yes] 1380 
+
+Justification: We read the code of ethics. 1381 
+
+Guidelines: 1382 
+
+• The answer NA means that the authors have not reviewed the NeurIPS Code of Ethics. 1383 
+
+• If the authors answer No, they should explain the special circumstances that require a 1384 
+
+deviation from the Code of Ethics. 1385 
+
+• The authors should make sure to preserve anonymity (e.g., if there is a special consid-1386 
+
+eration due to laws or regulations in their jurisdiction). 1387 
+
+10. Broader impacts 1388 
+
+Question: Does the paper discuss both potential positive societal impacts and negative 1389 
+
+societal impacts of the work performed? 1390 
+
+Answer: [NA] 1391 
+
+Justification: Our paper is mostly theoretical with limited societal impacts at this stage. 1392 
+
+Guidelines: 1393 
+
+• The answer NA means that there is no societal impact of the work performed. 1394 
+
+• If the authors answer NA or No, they should explain why their work has no societal 1395 
+
+impact or why the paper does not address societal impact. 1396 
+
+• Examples of negative societal impacts include potential malicious or unintended uses 1397 
+
+(e.g., disinformation, generating fake profiles, surveillance), fairness considerations 1398 
+
+(e.g., deployment of technologies that could make decisions that unfairly impact specific 1399 
+
+groups), privacy considerations, and security considerations. 1400 
+
+• The conference expects that many papers will be foundational research and not tied 1401 
+
+to particular applications, let alone deployments. However, if there is a direct path to 1402 
+
+any negative applications, the authors should point it out. For example, it is legitimate 1403 
+
+to point out that an improvement in the quality of generative models could be used to 1404 
+
+generate deepfakes for disinformation. On the other hand, it is not needed to point out 1405 
+
+that a generic algorithm for optimizing neural networks could enable people to train 1406 
+
+models that generate Deepfakes faster. 1407 
+
+• The authors should consider possible harms that could arise when the technology is 1408 
+
+being used as intended and functioning correctly, harms that could arise when the 1409 
+
+technology is being used as intended but gives incorrect results, and harms following 1410 
+
+from (intentional or unintentional) misuse of the technology. 1411 
+
+• If there are negative societal impacts, the authors could also discuss possible mitigation 1412 
+
+strategies (e.g., gated release of models, providing defenses in addition to attacks, 1413 
+
+mechanisms for monitoring misuse, mechanisms to monitor how a system learns from 1414 
+
+feedback over time, improving the efficiency and accessibility of ML). 1415 
+
+11. Safeguards 1416 
+
+Question: Does the paper describe safeguards that have been put in place for responsible 1417 
+
+release of data or models that have a high risk for misuse (e.g., pretrained language models, 1418 
+
+image generators, or scraped datasets)? 1419 
+
+Answer: [NA] 1420 
+
+Justification: Our method does not require safeguards. 1421 
+
+Guidelines: 1422 
+
+• The answer NA means that the paper poses no such risks. 1423 
+
+41 • Released models that have a high risk for misuse or dual-use should be released with 1424 
+
+necessary safeguards to allow for controlled use of the model, for example by requiring 1425 
+
+that users adhere to usage guidelines or restrictions to access the model or implementing 1426 
+
+safety filters. 1427 
+
+• Datasets that have been scraped from the Internet could pose safety risks. The authors 1428 
+
+should describe how they avoided releasing unsafe images. 1429 
+
+• We recognize that providing effective safeguards is challenging, and many papers do 1430 
+
+not require this, but we encourage authors to take this into account and make a best 1431 
+
+faith effort. 1432 
+
+12. Licenses for existing assets 1433 
+
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in 1434 
+
+the paper, properly credited and are the license and terms of use explicitly mentioned and 1435 
+
+properly respected? 1436 
+
+Answer: [NA] 1437 
+
+Justification: We wrote the code for our models and datasets from scratch. 1438 
+
+Guidelines: 1439 
+
+• The answer NA means that the paper does not use existing assets. 1440 
+
+• The authors should cite the original paper that produced the code package or dataset. 1441 
+
+• The authors should state which version of the asset is used and, if possible, include a 1442 
+
+URL. 1443 
+
+• The name of the license (e.g., CC-BY 4.0) should be included for each asset. 1444 
+
+• For scraped data from a particular source (e.g., website), the copyright and terms of 1445 
+
+service of that source should be provided. 1446 
+
+• If assets are released, the license, copyright information, and terms of use in the 1447 
+
+package should be provided. For popular datasets, paperswithcode.com/datasets 1448 
+
+has curated licenses for some datasets. Their licensing guide can help determine the 1449 
+
+license of a dataset. 1450 
+
+• For existing datasets that are re-packaged, both the original license and the license of 1451 
+
+the derived asset (if it has changed) should be provided. 1452 
+
+• If this information is not available online, the authors are encouraged to reach out to 1453 
+
+the asset’s creators. 1454 
+
+13. New assets 1455 
+
+Question: Are new assets introduced in the paper well documented and is the documentation 1456 
+
+provided alongside the assets? 1457 
+
+Answer: [NA] 1458 
+
+Justification: N/A 1459 
+
+Guidelines: 1460 
+
+• The answer NA means that the paper does not release new assets. 1461 
+
+• Researchers should communicate the details of the dataset/code/model as part of their 1462 
+
+submissions via structured templates. This includes details about training, license, 1463 
+
+limitations, etc. 1464 
+
+• The paper should discuss whether and how consent was obtained from people whose 1465 
+
+asset is used. 1466 
+
+• At submission time, remember to anonymize your assets (if applicable). You can either 1467 
+
+create an anonymized URL or include an anonymized zip file. 1468 
+
+14. Crowdsourcing and research with human subjects 1469 
+
+Question: For crowdsourcing experiments and research with human subjects, does the paper 1470 
+
+include the full text of instructions given to participants and screenshots, if applicable, as 1471 
+
+well as details about compensation (if any)? 1472 
+
+Answer: [NA] 1473 
+
+Justification: N/A 1474 
+
+42 Guidelines: 1475 
+
+• The answer NA means that the paper does not involve crowdsourcing nor research with 1476 
+
+human subjects. 1477 
+
+• Including this information in the supplemental material is fine, but if the main contribu-1478 
+
+tion of the paper involves human subjects, then as much detail as possible should be 1479 
+
+included in the main paper. 1480 
+
+• According to the NeurIPS Code of Ethics, workers involved in data collection, curation, 1481 
+
+or other labor should be paid at least the minimum wage in the country of the data 1482 
+
+collector. 1483 
+
+15. Institutional review board (IRB) approvals or equivalent for research with human 1484 
+
+subjects 1485 
+
+Question: Does the paper describe potential risks incurred by study participants, whether 1486 
+
+such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) 1487 
+
+approvals (or an equivalent approval/review based on the requirements of your country or 1488 
+
+institution) were obtained? 1489 
+
+Answer: [NA] 1490 
+
+Justification: N/A 1491 
+
+Guidelines: 1492 
+
+• The answer NA means that the paper does not involve crowdsourcing nor research with 1493 
+
+human subjects. 1494 
+
+• Depending on the country in which research is conducted, IRB approval (or equivalent) 1495 
+
+may be required for any human subjects research. If you obtained IRB approval, you 1496 
+
+should clearly state this in the paper. 1497 
+
+• We recognize that the procedures for this may vary significantly between institutions 1498 
+
+and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the 1499 
+
+guidelines for their institution. 1500 
+
+• For initial submissions, do not include any information that would break anonymity (if 1501 
+
+applicable), such as the institution conducting the review. 1502 
+
+16. Declaration of LLM usage 1503 
+
+Question: Does the paper describe the usage of LLMs if it is an important, original, or 1504 
+
+non-standard component of the core methods in this research? Note that if the LLM is used 1505 
+
+only for writing, editing, or formatting purposes and does not impact the core methodology, 1506 
+
+scientific rigorousness, or originality of the research, declaration is not required. 1507 
+
+Answer: [NA] 1508 
+
+Justification: We do not use LLMs in this work. 1509 
+
+Guidelines: 1510 
+
+• The answer NA means that the core method development in this research does not 1511 
+
+involve LLMs as any important, original, or non-standard components. 1512 
+
+• Please refer to our LLM policy ( https://neurips.cc/Conferences/2025/LLM )1513 
+
+for what should or should not be described. 1514 
+
+43

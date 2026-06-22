@@ -1,0 +1,2658 @@
+Title: 8069_Collaborative_Determinist.pdf
+
+URL Source: https://openreview.net/pdf?id=dg1npGNK0d
+
+Number of Pages: 27
+
+Markdown Content:
+# Collaborative Deterministic–Probabilistic Forecasting for Real-World Spatiotemporal Systems 
+
+Anonymous Author(s) 
+
+Affiliation Address 
+
+email 
+
+## Abstract 
+
+Probabilistic forecasting is crucial for real-world spatiotemporal systems, such as 1
+
+climate, energy, and urban environments, where quantifying uncertainty is essential 2
+
+for informed, risk-aware decision-making. While diffusion models have shown 3
+
+promise in capturing complex data distributions, their application to spatiotem-4
+
+poral forecasting remains limited due to complex spatiotemporal dynamics and 5
+
+high computational demands. In this work, we propose CoST , a novel frame-6
+
+work that Co llaborates deterministic and diffusion models for Spatio Temporal 7
+
+forecasting. CoST formulates a mean-residual decomposition strategy: it lever-8
+
+ages a powerful deterministic model to capture the conditional mean and a 9
+
+lightweight diffusion model to learn residual uncertainties This collaborative for-10 
+
+mulation simplifies learning objectives, enhances forecasting accuracy, enables 11 
+
+uncertainty quantification, and significantly improves computational efficiency. To 12 
+
+address spatial heterogeneity, we further design a scale-aware diffusion mech-13 
+
+anism to guide the diffusion process. Extensive experiments across ten real-14 
+
+world datasets from climate, energy, communication, and urban systems show 15 
+
+that CoST achieves 25% performance gains over state-of-the-art baselines, while 16 
+
+significantly reducing computational cost. Code and datasets are available at: 17 
+
+https://anonymous.4open.science/r/CoST_8069 .18 
+
+## 1 Introduction 19 
+
+Real-world spatiotemporal systems underpin many critical domains, such as climate science, energy 20 
+
+systems, communication networks, and urban environments. Accurate forecasting of the dynamics is 21 
+
+essential for planning, resource allocation, and risk management [ 58 , 5, 59 , 51 ]. Existing approaches 22 
+
+fall into two categories: deterministic and probabilistic forecasting. Deterministic methods estimate 23 
+
+the conditional mean by minimizing MAE or MSE losses to capture spatiotemporal patterns [ 64 ,24 
+
+37 , 63 ]. In contrast, probabilistic methods aim to learn the full predictive distribution of observed 25 
+
+data [ 46 , 31 , 62 ], enabling uncertainty quantification to support forecasting. This is particularly 26 
+
+important in many domains, for example, in climate modeling and renewable energy, where assessing 27 
+
+prediction reliability is essential for risk-aware decisions such as disaster preparedness and energy 28 
+
+grid management [42, 54]. 29 
+
+In this paper, we highlight the critical role of probabilistic forecasting in capturing uncertainty 30 
+
+and improving the reliability of spatiotemporal predictions. However, it is non-trivial due to three 31 
+
+challenges. First, these systems exhibit complex evolving dynamics, characterized by periodic trends, 32 
+
+seasonal variations, and stochastic fluctuations [ 7, 62 ]. Second, these systems involve intricate 33 
+
+spatiotemporal interactions and nonlinear dependencies [ 24 , 63 ]. Third, real-world applications 34 
+
+require both computationally efficient and scalable models [ 41 , 51 ]. Recently, diffusion models 35 
+
+have been widely adopted for probabilistic forecasting [ 57 , 62 , 46 , 51 ]. Compared with existing 36 
+
+Submitted to 39th Conference on Neural Information Processing Systems (NeurIPS 2025). Do not distribute. approaches such as Generative Adversarial Networks (GANs) [ 20 , 15 ] and Variational Autoencoders 37 
+
+(VAEs) [ 28 , 30 ], diffusion models offer superior capability in capturing complex data distributions 38 
+
+while ensuring stable training [ 22 , 53 , 23 ]. These advantages make diffusion models a promising 39 
+
+alternative. However, originally developed for image generation, they face inherent limitations in 40 
+
+capturing temporal correlations in sequential data, as evidenced in video generation [ 66 , 45 , 9 , 17 ]41 
+
+and time series forecasting [62, 47, 46, 50]. 42 Existing Spatiotemporal Forecasting Models ࢞࢟ॱሾ ሿ ࢞ȁ     
+
+> Deterministic Model
+> ࢖ሺ࢟ȁ࢞ሻ
+> Diffusion Model ࢞
+> Deterministic Model Diffusion Model ࢞ሻ ࢞ȁ ࢘ሺ࢖ ࢞ȁ࢟ॱሾ ሿሻ ࢞ȁ ࢟ሺ࢖
+> Our Mean-Residual Decomposition Framework Deterministic Probabilistic
+
+Figure 1: Comparison of existing models with our mean-residual decomposition framework. To address this issue, recent efforts have ex-43 
+
+plored incorporating temporal correlations as 44 
+
+conditional inputs to guide the diffusion pro-45 
+
+cess [ 46 , 50 , 57 ], or injecting temporal priors 46 
+
+into the noised data to explicitly model tempo-47 
+
+ral correlations across time steps [ 31 , 51 , 62 ]. 48 
+
+While these approaches improve temporal mod-49 
+
+eling, they remain constrained by the inherent 50 
+
+limitations of the diffusion framework [ 46 , 31 ,51 
+
+47 ]. In contrast, we introduce a new perspective: 52 
+
+rather than relying solely on diffusion models 53 
+
+to capture the full data distribution, we propose 54 
+
+a collaborative approach that combines a deter-55 
+
+ministic model and a diffusion model, leverag-56 
+
+ing their complementary strengths for probabilistic forecasting. Our design offers two key advantages. 57 
+
+First, by leveraging powerful deterministic models to predict the conditional mean, it effectively cap-58 
+
+tures the primary spatiotemporal patterns and benefits from advancements in established architectures. 59 
+
+Second, instead of requiring the diffusion model to learn the full data distribution from scratch, we 60 
+
+employ it to model the residuals, focusing its capacity on capturing uncertainty beyond the mean. 61 
+
+This collaborative framework simplifies the learning objectives for each component and enhances 62 
+
+both predictive accuracy and probabilistic expressiveness. 63 
+
+Building on this insight, we propose CoST , a novel framework that Co llaborates deterministic and 64 
+
+diffusion models for Spatio Temporal forecasting. As illustrated in Figure 1, we first leverage an 65 
+
+advanced deterministic spatiotemporal forecasting model to estimate the conditional mean E[y|x],66 
+
+effectively capturing the regular patterns. Based on this, we model the residual distribution p(r|x) = 67 
+
+p(( y − E[y|x]) |x) using a diffusion model, which complements the deterministic forecasting with 68 
+
+uncertainty quantification. Since the diffusion model focuses solely on residuals, it allows us to adopt 69 
+
+a lightweight denoising network and mitigate the computational overhead associated with multi-step 70 
+
+diffusion processes. To address spatial heterogeneity, we quantify differences across spatial units 71 
+
+and introduce a scale-aware diffusion mechanism. More importantly, we propose a comprehensive 72 
+
+evaluation protocol for spatiotemporal probabilistic forecasting by incorporating metrics such as 73 
+
+QICE and IS, rather than relying solely on traditional measures like CRPS, MAE, and RMSE. In 74 
+
+summary, our main contributions are as follows: 75 
+
+• We highlight the importance of probabilistic forecasting for complex spatiotemporal systems 76 
+
+and introduce a novel perspective that integrates deterministic and probabilistic modeling in a 77 
+
+collaborative framework. 78 
+
+• We propose CoST , a mean-residual decomposition approach that employs a deterministic model to 79 
+
+estimate the conditional mean and a diffusion model to capture the residual distribution. We further 80 
+
+design a scale-aware diffusion mechanism to address spatial heterogeneity. 81 
+
+• Extensive experiments on ten real-world datasets spanning climate science, energy systems, com-82 
+
+munication networks, and urban environments show that CoST consistently outperforms state-of-83 
+
+the-art baselines on both deterministic and probabilistic metrics, achieving an average improvement 84 
+
+of 25% while offering notable gains in computational efficiency. 85 
+
+## 2 Related Work 86 
+
+Spatiotemporal deterministic forecasting. Deterministic forecasting of spatiotemporal systems 87 
+
+focuses on point estimation. These models are typically trained with loss functions like MSE or MAE 88 
+
+to learn the conditional mean E[y|x], capturing regular patterns. Common deep learning architectures 89 
+
+include MLP-based [ 49 , 44 , 67 ], CNN-based [ 29 , 34 , 64 ], and RNN-based [ 2, 33 , 56 , 55 ] models, 90 
+
+2valued for their efficiency. GNN-based methods [ 1, 3, 18 , 25 ] capture spatial dependencies in graph-91 
+
+based data, while Transformer-based models [ 10 , 12 , 37 , 61 , 5] are effective at modeling complex 92 
+
+temporal dynamics. 93 
+
+Spatiotemporal probabilistic forecasting. The core of probabilistic forecasting lies in modeling 94 
+
+uncertainty, aiming to capture the full data distribution [ 60 , 53 ]. This is particularly suited for 95 
+
+modeling the stochastic nature of spatiotemporal systems. While early methods focused on Bayesian 96 
+
+approaches, recent advances have explored generative models such as GANs [ 26 , 48 , 65 ], VAEs [ 11 ,97 
+
+13 , 68 ], and diffusion models [ 53 , 8 , 32 ]. Diffusion models, in particular, have gained traction for 98 
+
+their ability to model complex distributions with stable training, yielding strong performance in 99 
+
+spatiotemporal forecasting [46, 47, 50, 51]. 100 
+
+Diffusion-based spatiotemporal probabilistic forecasting. Most diffusion-based forecasting meth-101 
+
+ods formulate the task as conditional generation without explicitly modeling temporal dynamics, 102 
+
+which hinders the generation of temporally coherent sequences [ 53 , 16 , 57 , 47 ]. Moreover, the 103 
+
+progressive corruption of time series during diffusion often distorts key patterns like long-term 104 
+
+trends and periodicity, making temporal recovery difficult [ 62 , 35 ]. To address this, methods such as 105 
+
+TimeGrad [ 46 ] and TimeDiff [ 50 ] incorporate temporal embeddings as conditional inputs to enhance 106 
+
+temporal awareness. Other approaches like NPDiff [ 51 ], TMDM [ 31 ], and Diffusion-TS [ 62 ] inject 107 
+
+temporal priors into the diffusion process to better preserve temporal dynamics. More recently, 108 
+
+DYffusion [ 47 ] redefines the denoising process to explicitly model temporal transitions at each 109 
+
+diffusion step. Unlike prior methods, we avoid using diffusion to model temporal dynamics. Instead, 110 
+
+we decouple forecasting into deterministic mean prediction and residual uncertainty estimation. The 111 
+
+diffusion model focuses solely on the residuals, simplifying learning and allowing for a smaller 112 
+
+denoising network, which greatly reduces the computational cost of the iterative diffusion process. 113 
+
+## 3 Preliminaries 114 
+
+We provide a summary of notations used in this paper in Appendix A.1 for clarity. 115 
+
+Spatiotemporal systems. Spatiotemporal systems underpin many domains such as climate science, 116 
+
+energy, communication networks, and urban environments. The data recording spatiotemporal 117 
+
+dynamics are typically represented as a tensor x ∈ RT ×V ×C , where T , V , and C denote the 118 
+
+temporal, spatial, and feature dimensions, respectively. Depending on the spatial structure, the data 119 
+
+can be organized as grid-structured ( V = H × W ) or graph-structured (where V represents the set of 120 
+
+nodes). Given a historical context xco = xt−M +1: t of length M , the goal is to predict future targets 121 
+
+xta = xt+1: t+P over a horizon P using a model F.122 
+
+Conditional diffusion models. The diffusion-based forecasting includes a forward process and a 123 
+
+reverse process. In the forward process, noise is added incrementally to the target data xta  
+
+> 0
+
+, gradually 124 
+
+transforming the data distribution into a standard Gaussian distribution N (0, I). At any diffusion 125 
+
+step, the corrupted target data can be computed using the one-step forward equation: 126 
+
+xta n = √¯αnxta  
+
+> 0
+
++ √1 − ¯αnϵ, ϵ ∼ N (0, I), (1) where ¯αn = Qni=1 αi and αn = 1 − βn. In the reverse process, prediction begins by first sampling 127 
+
+xta N from the standard Gaussian distribution N (0, I), followed by a denoising procedure through the 128 
+
+following Markov process: 129 
+
+pθ (xta  
+
+> 0: N
+
+) := p(xta N )
+
+> N
+
+Y
+
+> n=1
+
+pθ (xta n−1|xta n , xco  
+
+> 0
+
+),pθ (xta n−1|xta n ) := N (xta n−1; μθ (xta n , n |xco  
+
+> 0
+
+), Σθ (xta n , n )) ,μθ (xta n , n |xco  
+
+> 0
+
+) = 1
+
+√¯αn
+
+
+
+xta n − βn
+
+√1 − ¯αn
+
+ϵθ (xta n , n |xco  
+
+> 0
+
+)
+
+
+
+(2) where the variance Σθ (xta n , n ) = 1− ¯αn−1  
+
+> 1−¯αn
+
+βn, and ϵθ (xta n , n |xco  
+
+> 0
+
+) is predicted by the denoising 130 
+
+network trained by the loss function below: 131 
+
+L(θ) = En, x0,ϵ 
+
+h
+
+ϵ − ϵθ (xta n , n |xco  
+
+> 0
+
+) 22
+
+i
+
+. (3) 3(a) Pretrain of the Deterministic Model Deterministic Model (b) Customized Fluctuation Scale: 
+
+> Grid Data Graph Data
+> Repeat Random Deterministic Model
+> Forward Process:
+> Denoising Process: Scale-aware Diffusion Model
+> (c) Mean-Residual Decomposition Framework
+
+Figure 2: Overview of CoST: (a) Pretraining of the deterministic model; (b) Computation of the customized fluctuation scale; (c) Overall framework of the mean-residual decomposition. 
+
+Evaluations of probabilistic forecasting. We argue that probabilistic forecasting should be assessed 132 
+
+from two key perspectives: Data Distribution —the predicted distribution should match the empirical 133 
+
+distribution, and Prediction Usability —prediction intervals should achieve high coverage while 134 
+
+remaining sharp. While metrics like CRPS, MAE and RMSE are widely used, they fail to assess: (i) 135 
+
+the accuracy of quantile-wise coverage; (ii) whether the interval width reflects true uncertainty. To 136 
+
+address this, we introduce Quantile Interval Coverage Error (QICE) [ 21 ] and Interval Score (IS) [ 19 ]137 
+
+as complementary metrics. 138 
+
+(i) QICE measures the mean absolute deviation between the empirical and expected proportions of 139 
+
+ground-truth values falling into each of equal-sized quantile intervals. QICE evaluates how well the 140 
+
+predicted distribution aligns with the expected coverage across quantiles, which is defined as follows: 141 
+
+QICE := 1
+
+MQIs 
+
+> MQIs
+
+X
+
+> m=1
+
+rm − 1
+
+MQIs 
+
+, rm = 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+1yn≥ˆylow mn · 1yn≤ˆyhigh mn
+
+, (4) where ˆylow m 
+
+> n
+
+and ˆyhigh m 
+
+> n
+
+denote the bounds of the m-th quantile interval for yn. Ideally, each QI 142 
+
+should contain 1/M QIs of the observations, yielding a QICE of 0. Lower QICE indicates better 143 
+
+alignment between predicted and true distributions. 144 
+
+(ii) IS evaluates prediction interval (PI) quality by jointly accounting for sharpness and empirical 145 
+
+coverage, and is defined as: 146 
+
+IS := 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+
+
+(uαCI  
+
+> n
+
+− lαCI  
+
+> n
+
+) + 2
+
+αCI 
+
+(lαCI  
+
+> n
+
+− yn)1yn<l αCI n + 2
+
+αCI 
+
+(yn − uαCI  
+
+> n
+
+)1yn>u αCI n
+
+
+
+,
+
+(5) where uαCI  
+
+> n
+
+and lαCI  
+
+> n
+
+are the upper and lower bounds of the central prediction interval for the n-th 147 
+
+data point, derived from the corresponding predictive quantiles. A narrower interval improves the 148 
+
+score, while missed coverage incurs a penalty scaled by αCI . Lower IS indicates better performance. 149 
+
+## 4 Methodology 150 
+
+In this section, we propose CoST, a unified framework that combines the strengths of deterministic 151 
+
+and diffusion models. Specifically, we first train a deterministic model to predict the conditional 152 
+
+mean, capturing the regular spatiotemporal patterns. Then, guided by a customized fluctuation scale, 153 
+
+we employ a scale-aware diffusion model to learn the residual distribution, enabling fine-grained 154 
+
+uncertainty modeling. An overview of the CoST architecture is shown in Figure 2. 155 
+
+4.1 Theoretical Analysis of Mean-Residual Decomposition 156 
+
+Current diffusion-based probabilistic forecasting approaches typically employ a single diffusion 157 
+
+model to capture the full distribution of data, incorporating both the regular spatiotemporal patterns 158 
+
+4and the random fluctuations. However, jointly modeling these components remains challenging [ 62 ]. 159 
+
+Inspired by [ 38 ] and the Reynolds decomposition in fluid dynamics [ 43 ], we propose to decompose 160 
+
+the spatiotemporal data xta as follows: 161 
+
+xta = E[xta |xco ]
+
+| {z }
+
+> := μ(Deterministic )
+
++ ( xta − E[xta |xco ]) 
+
+| {z }
+
+> := r(Dif f usion )
+
+, (6) where μ is the conditional mean representing the regular patterns, and r is the residual representing 162 
+
+the random variations. If the deterministic model approximates the conditional mean accurately, 163 
+
+the expected residual becomes negligible, i.e. E[r|xco ] ≈ 0, and we can obtain that var( r|xco ) = 164 
+
+var( xta |xco ). Based on the law of total variance [ 4 ], we can express the variance of the target data 165 
+
+and residuals as: 166 
+
+var( r) = E[var( r|xco )] + var( E[r|xco ]) 
+
+| {z }
+
+> =0
+
+, var( xta ) = E[var( xta |xco )] + var( E[xta |xco ]) 
+
+| {z }
+
+> ≥0
+
+. (7) Due to var( r|xco ) = var( xta |xco ), we have var( r) ≤ var( xta ). Moreover, the highly dynamic 167 
+
+nature of the spatiotemporal system results in a larger var( E[xta |xco ]) , which consequently makes 168 
+
+var( r) smaller compared to var( xta ). Our core idea is that if a deterministic model can accurately 169 
+
+predict the conditional mean, that is, μ ≈ Eθ [xta |x], then the diffusion model can be dedicated solely 170 
+
+to learning the simpler residual distribution. This design avoids the challenge diffusion models face 171 
+
+in modeling complex spatiotemporal dynamics, while fully exploiting their strength in uncertainty 172 
+
+estimation. By collaborating high-performing deterministic architectures and diffusion models, our 173 
+
+method effectively captures regular dynamics and models uncertainty via residual learning. 174 
+
+4.2 Mean Prediction via Deterministic Model 175 
+
+To capture the conditional mean Eθ [xta |xco ], our framework leverages existing high-performance de-176 
+
+terministic architectures, which are designed to capture complex spatiotemporal dynamics efficiently. 177 
+
+In our main experiments, we use the STID [ 49 ] model as the backbone for mean prediction, and also 178 
+
+validate our framework with ConvLSTM [ 52 ], STNorm [ 14 ], and iTransformer [ 36 ] to ensure its 179 
+
+generality ( See Section 5.1). In the first stage of training, we pretrain the deterministic model for 50 180 
+
+epochs using historical conditional inputs xco to output the mean estimate Eθ [xta |xco ]. The model is 181 
+
+trained with the standard L2 loss: 182 
+
+L2 = Eθ [xta |xco ] − xta 22 . (8) 
+
+4.3 Residual Learning via Diffusion Model 183 
+
+The residual distribution of spatiotemporal data is not independently and identically distributed 184 
+
+(i.i.d.) nor does it follow a fixed distribution, such as N (0 , σ ). Instead, it often exhibits complex 185 
+
+spatiotemporal dependence and heterogeneity. We use the diffusion model to focus on learning the 186 
+
+distribution of residual rta = xta −Eθ [xta |xco ]. Accordingly, the target data xta for diffusion models 187 
+
+in Eqs. (1) , (2) , and (3) is replaced by rta . We incorporate timestamp information as a condition 188 
+
+in the denoising process and concatenate the context data xco  
+
+> 0
+
+with noised residual rta n as input to 189 
+
+capture real-time fluctuations. Notably, no noise is added to xco  
+
+> 0
+
+during diffusion training or inference. 190 
+
+To model the spatial patterns of the residuals, we propose a scale-aware diffusion process to further 191 
+
+distinguish the heterogeneity for different spatial units. In this section, we detail the calculation of Q192 
+
+and how it is integrated into the scale-aware diffusion process. 193 
+
+(i) Customized fluctuation scale. Specifically, we apply the Fast Fourier Transform (FFT) to 194 
+
+spatiotemporal sequences in the training set to quantify fluctuation levels in different spatial units and 195 
+
+use the custom scale Q as input to account for spatial heterogeneity in residual. Specifically, we first 196 
+
+employ FFT to extract the fluctuation components for each spatial unit within the training set. The 197 
+
+detailed steps are as follows: 198 
+
+5Ak = |FFT (x)k| , ϕk = ϕ (FFT (x)k) , Amax = max 
+
+> k∈
+
+{1,··· ,⌊ L 
+
+> 2
+
+⌋+1 } Ak,
+
+K =
+
+
+
+k ∈
+
+
+
+1, · · · ,
+
+ L
+
+2
+
+
+
++ 1 
+
+
+
+: Ak < 0.1 × Amax 
+
+
+
+,
+
+xr[i] = X
+
+> k∈K
+
+Ak
+
+h
+
+cos (2 πfki + ϕk) + cos  2π¯fki + ¯ϕk
+
+ i
+
+,
+
+(9) where Ak, ϕ k reprent the amplitude and phase of the k−th frequency component. L is the temporal 199 
+
+length of the training set. Amax is the maximum amplitude among the components, obtained using 200 
+
+the max operator. K represents the set of indices for the selected residual components. fk is the 201 
+
+frequency of the k-th component. ¯fk, ¯ϕk represent the conjugate components. xr ref to the extracted 202 
+
+residual component of the training set. We then compute the variance σ2 
+
+> v
+
+of the residual sequence for 203 
+
+each location v and expand it to match the shape as rta  
+
+> 0
+
+∈ RB×V ×P , where B represents the batch 204 
+
+size. And we can get the variance tensor M:205 
+
+Mb,v,p = σ2 
+
+> v
+
+, ∀b ∈ { 1, · · · , B }, ∀v ∈ { 1, · · · , V }, ∀p ∈ { 1, · · · , P }. (10) The residual fluctuations are bidirectional, encompassing both positive and negative variations, so 206 
+
+we generate a random sign tensor S ∈ RB×V ×P for M, where each element Sb,v,p of S is sampled 207 
+
+from a Bernoulli distribution with p = 0 .5. The customized fluctuation scale Q is computed as: 208 
+
+Qb,v,p = Sb,v,p × M b,v,p , ∀b ∈ { 1, · · · , B }, ∀v ∈ { 1, · · · , V }, ∀p ∈ { 1, · · · , P }. (11) Then Q is used as the input of the denoising network. 209 
+
+(ii) Scale-aware diffusion process. The vanilla diffusion models assume a shared prior distribution 210 
+
+N (0 , I ) across all spatial locations, failing to capture spatial heterogeneity. To further model such 211 
+
+differences, we adopt the technique proposed by [ 21 ] to make the residual learning location-specific 212 
+
+conditioned on Q. Specifically, we redefine the noise distribution at the endpoint of the diffusion 213 
+
+process as follows: 214 
+
+p(rta N ) = N (Q, I ), (12) Accordingly, the Eq (1) in the forward process is rewritten as: 215 
+
+rta n = √¯αnrta  
+
+> 0
+
++ (1 − √¯αn)Q + √1 − ¯αnϵ, ϵ ∼ N (0 , I ). (13) And in the denoising process, we sample rta N from N (Q, I ), and denoise it use Eq (2), the computation 216 
+
+of μθ (rta n , n |xco  
+
+> 0
+
+) in Eq (2) is modified as: 217 
+
+μθ (rta n , n |xco  
+
+> 0
+
+) = 1
+
+√¯αn
+
+
+
+rta n − βn
+
+√1 − ¯αn
+
+ϵθ (rta n , n |xco  
+
+> 0
+
+)
+
+
+
++ (1 − 1
+
+√¯αn
+
+)Q. (14) This modification allows the diffusion process to be conditioned on location-specific priors Q,218 
+
+enhancing its ability to model spatial heterogeneity in uncertainty. 219 
+
+4.4 Training and Inference 220 
+
+Our training follows a two-stage training procedure: we first pretrain a deterministic model to 221 
+
+predict the conditional mean, then train a diffusion model to capture the residual distribution. The full 222 
+
+procedure is outlined in Algorithm 1. The inference consists of two paths: the pretrained deterministic 223 
+
+model predicts the conditional mean, and the diffusion model estimates the residuals. Their outputs 224 
+
+are combined to form the final prediction, as detailed in Algorithm 2. 225 
+
+## 5 Experiments 226 
+
+Datasets. We evaluate our method on ten datasets spanning four domains, including climate (SST-227 
+
+CESM2 and SST-ERA5), energy (SolarPower), communication (MobileNJ and MobileSH), and 228 
+
+urban systems (CrowdBJ, CrowdBM, TaxiBJ, BikeDC and Los-Speed), each featuring distinct 229 
+
+spatiotemporal characteristics. Detailed information on the datasets can be found in Appendix C.1. 230 
+
+Baselines. We compare against six representative state-of-the-art baselines commonly adopted in 231 
+
+spatiotemporal modeling, including: D3VAE [ 30 ], DiffSTG [ 57 ], TimeGrad [ 46 ], CSDI [ 53 ], DYf-232 
+
+fusion [47] , and NPDiff [51] . Detailed descriptions of each baseline are provided in Appendix C.2. 233 
+
+6Table 1: Short-term forecasting results in terms of CRPS, QICE, and IS. Bold indicates the best performance, while underlining denotes the second-best. DYffusion is limited to grid-format data, and ‘-’ denotes results that are not applicable.                                                                                                                             
+
+> Model Climate MobileSH TaxiBJ SolarPower CrowdBJ CRPS QICE IS CRPS QICE IS CRPS QICE IS CRPS QICE IS CRPS QICE IS
+> D3VAE 0.053 0.071 15.8 0.856 0.105 1.729 0.433 0.160 985.7 0.475 0.083 731.1 0.668 0.099 53.6 DiffSTG 0.026 0.068 7.42 0.303 0.078 0.526 0.299 0.074 416.5 0.213 0.068 240.6 0.436 0.089 32.1 TimeGrad 0.042 0.147 16.0 0.489 0.143 0.759 0.170 0.102 213.2 1.000 0.128 781.7 0.385 0.113 48.6 CSDI 0.027 0.019 5.18 0.200 0.052 0.295 0.122 0.048 121.8 0.267 0.050 221.6 0.306 0.028 16.4 NPDiff 0.022 0.031 4.24 0.201 0.106 0.627 0.222 0.112 474.1 0.209 0.020 175.3 0.287 0.120 34.5 DYffusion 0.020 0.123 12.4 0.230 0.096 0.573 0.084 0.054 99.5 ------
+> CoST 0.021 0.009 4.04 0.147 0.014 0.215 0.100 0.023 95.3 0.208 0.019 192.1 0.215 0.014 11.5
+
+Table 2: Short-term forecasting results in terms of MAE and RMSE.                                                                                     
+
+> Model Climate MobileSH TaxiBJ SolarPower CrowdBJ MAE RMSE MAE RMSE MAE RMSE MAE RMSE MAE RMSE
+> D3VAE 1.75 2.31 0.186 0.373 49.3 84.8 60.1 122.8 5.16 10.1 DiffSTG 0.90 1.13 0.066 0.103 41.8 69.4 31.1 63.8 3.68 6.63 TimeGrad 1.31 1.48 0.047 0.053 29.1 34.1 39.3 94.8 4.37 5.43 CSDI 0.94 1.20 0.044 0.075 18.2 31.6 38.8 69.6 2.71 5.51 NPDiff 0.79 1.07 0.037 0.057 26.7 52.2 32.1 53.6 2.05 3.27 DYffusion 0.86 1.07 0.050 0.072 12.3 18.0 ----
+> CoST 0.74 0.96 0.033 0.051 15.1 25.6 29.7 51.9 1.92 3.04
+
+Metrics. To evaluate the performance, we employ two deterministic metrics, MAE and RMSE, along 234 
+
+with three probabilistic metrics: CRPS, QICE and IS. For QICE, we set the number of QIs, denoted 235 
+
+as MQIs , to 10. We choose 10 bins for QICE to align with the original proposal [ 21 ]. which offers a 236 
+
+balanced trade-off between granularity and stability. For IS, we choose a confidence level of 90% 237 
+
+(i.e., αCI = 0 .1) following common practice in spatiotemporal forecasting tasks [53, 46]. 238 
+
+Experimental configuration. We define the short-term forecasting task as predicting the next 12 239 
+
+time steps based on the previous 12 observations, following [ 51 , 57 ]. Since the temporal granularity 240 
+
+varies across datasets, the actual time duration corresponding to these 12 steps differs accordingly. 241 
+
+In addition to the standard 12-step setting commonly used in spatiotemporal forecasting, we eval-242 
+
+uate long-term forecasting by predicting 64 future steps based on the preceding 64 observations, 243 
+
+following [63, 27, 40]. Detailed training and model configurations are provided in Appendix C.3. 244 
+
+5.1 Spatiotemporal Probabilistic Forecasting 245 
+
+Short-term forecasting. Table 1 presents the results of probabilistic metrics for selected datasets. 246 
+
+Due to space constraints, the remaining results are in Appendix Table 6. As shown in Table 1, 247 
+
+CoST consistently outperforms baseline methods across all evaluated datasets. Compared to the 248 
+
+best-performing baseline methods on each dataset, CoST demonstrates an average improvement of 249 
+
+17.4% in CRPS and 46.6% in QICE metrics, indicating its superior ability to accurately capture the 250 
+
+true distribution characteristics. Moreover, CoST achieves a 16.5% improvement in the IS metric, 251 
+
+suggesting that its prediction intervals not only maintain compactness but also exhibit higher coverage, 252 
+
+thereby better reflecting the uncertainty of data. Although certain individual metrics may not reach 253 
+
+the optimal level on specific datasets, CoST consistently maintains performance comparable to the 254 
+
+best methods. Beyond probabilistic metrics, we also report deterministic evaluation results (MAE 255 
+
+and RMSE) in Table 2 and Appendix Table 7. The results show that our method achieves an average 256 
+
+reduction of 7% in MAE and 6.1% in RMSE datasets. This suggests that the integration with a 257 
+
+strong conditional mean estimator enables CoST to better capture regular patterns compared to other 258 
+
+probabilistic baseline models. 259 
+
+Long-term forecasting. As shown in Appendix Table 8, CoST achieves substantial improvements 260 
+
+in long-term forecasting under probabilistic metrics, with an improvement of 15.0% and 70.4% in 261 
+
+terms of CRPS and QICE. Despite adopting a simple MLP architecture, CoST achieves higher overall 262 
+
+accuracy than CSDI, a Transformer-based model tailored for capturing long-range dependencies. 263 
+
+Furthermore, it provides significantly better training efficiency and inference speed, as detailed in 264 
+
+Section 5.4. In addition, CoST performs well on deterministic metrics (Appendix Table 9), achieving 265 
+
+an average reduction of 9.0% in MAE and 11.0% in RMSE compared to the best-performing baseline. 266 
+
+Framework generalization. To demonstrate the generality of CoST, we instantiate it with four 267 
+
+representative spatiotemporal forecasting models: STID [ 49 ], STNorm [ 14 ], ConvLSTM [ 52 ], and 268 
+
+7Table 3: Performance of different deterministic backbone models within the CoST framework. ’Diffusion (w/o m)’ denotes the results obtained using a single diffusion model.                                                                                                                           
+
+> Model Climate MobileNJ BikeDC MAE RMSE CRPS QICE IS MAE RMSE CRPS QICE IS MAE RMSE CRPS QICE IS Diffussion (w/o m) 1.070 1.361 0.030 0.030 6.58 0.195 0.6711 0.159 0.036 1.364 2.387 10.79 1.090 0.059 12.6
+> +iTransformer 0.818 1.088 0.023 0.018 4.83 0.122 0.207 0.123 0.021 0.815 0.526 2.23 0.454 0.035 3.82
+> Reduction 23.6% 20.1% 23.3% 40.0% 26.6% 37.4% 69.2% 22.6% 41.7% 40.2% 78.0% 79.3% 58.3% 40.7% 69.7%
+> + ConvLSTM 0.889 1.151 0.027 0.024 5.54 0.137 0.231 0.120 0.025 0.913 0.454 2.01 0.443 0.037 6.07
+> Reduction 16.9% 15.4% 10.0% 20.0% 15.8% 29.7% 65.6% 24.5% 30.6% 33.1% 81.0% 81.4% 59.4% 37.3% 51.8%
+> +STNorm 0.819 1.066 0.023 0.007 4.52 0.144 0.276 0.123 0.016 0.825 0.600 2.71 0.500 0.029 3.74
+> Reduction 23.5% 21.7% 23.3% 76.7% 31.3% 26.2% 58.9% 22.6% 55.6% 39.5% 74.9% 74.9% 54.1% 50.8% 70.3%
+
+iTransformer [ 36 ]. These models cover a diverse set of deep learning architectures, including CNNs, 269 
+
+RNNs, MLPs, and Transformers. As shown in Table 3, CoST consistently enhances the performance 270 
+
+of these backbones by effectively integrating deterministic and probabilistic modeling. Compared 271 
+
+to using a single diffusion model, CoST yields more accurate predictions and better-calibrated 272 
+
+uncertainty estimates, validating the framework’s broad applicability and effectiveness. 273 
+
+Figure 3: (a) and (b) show the ground-truth and predicted value of SST, and (c) displays the spatial distribution of forecasting uncertainty. 
+
+Case study of SST forecasting. To 274 
+
+assess our model’s ability to quantify 275 
+
+uncertainty under complex climate dy-276 
+
+namics, we evaluate its performance 277 
+
+in a key region for ENSO-related 278 
+
+Sea Surface Temperature (SST) fore-279 
+
+casting. As shown in Figure 3, 280 
+
+our model produces high-fidelity SST 281 
+
+forecasts that closely match ground 282 
+
+truth across both warm pool and cold 283 
+
+tongue regions. In addition to ac-284 
+
+curate mean predictions, it provides 285 
+
+well-calibrated uncertainty estimates, 286 
+
+revealing elevated variance in the cen-287 
+
+tral equatorial Pacific, especially near 288 
+
+0° latitude and 140°–130°W, where 289 
+
+sharp thermocline gradients and non-290 
+
+linear feedbacks make forecasting par-291 
+
+ticularly challenging. These high-292 
+
+uncertainty areas align with known regions of model divergence in climate science [ 39 , 6, 7], 293 
+
+demonstrating that our method delivers both accurate predictions and geophysically consistent 294 
+
+uncertainty estimates. 295 
+
+5.2 Ablation Study 296 
+
+We perform an ablation study to assess the contribution of each proposed module. Specifically, we 297 
+
+construct three model variants by progressively removing key components: (w/o s): removes the 298 
+
+scale-aware diffusion process; (w/o q) excludes the customized fluctuation scale as a prior; (w/o 299 
+
+m) removes the conditional mean predictor, relying solely on the diffusion model. We conduct 300 
+
+experiments on two datasets and visualize the results in terms of CRPS and IS metrics, as illustrated 301 
+
+in Appendix Figure 8. Results show that the deterministic predictor notably improves performance 302 
+
+by capturing regular spatiotemporal patterns, while also reducing the diffusion model’s complexity. 303 
+
+Adding the customized fluctuation scale further enhances accuracy, indicating its utility in providing 304 
+
+valuable fluctuation information across different spatial units. And the scale-aware diffusion process 305 
+
+enables the diffusion model to better utilize this condition. 306 
+
+5.3 Qualitative Analysis 307 
+
+Analysis of distribution alignment. As shown in Figure 4, the ground truth exhibits clear spa-308 
+
+tiotemporal multi-modality. In Figure 4(a), three peaks likely correspond to different time points or 309 
+
+varying states at the same time. CoST accurately captures all three peaks, while CSDI only fits two, 310 
+
+showing CoST’s superior multi-modal modeling. In Figure 4(b), both models capture two peaks, 311 
+
+but CoST aligns better with the peak spacing in the true distribution, reflecting stronger temporal 312 
+
+80.25 0.00 0.25 0.50 0.75 1.00 1.25       
+
+> Values
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> Density
+> (a) KDE Plot for Region 182
+> Ideal
+> CSDI
+> CoST
+> 0.5 0.0 0.5 1.0 1.5 2.0 2.5
+> Values
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Density
+> (b) KDE Plot for Region 520
+> Ideal
+> CSDI
+> CoST
+
+Figure 4: KDE plots of the MobileSH dataset for different regions: (a) Region 182, (b) Region 520. 0.2 0.4 0.6 0.8    
+
+> Confidence Level
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> PICP
+> (a) CrowdBM
+> CoST
+> CSDI
+> Ideal
+> 0.2 0.4 0.6 0.8
+> Confidence Level
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> PICP
+> (b) MobileSH
+> CoST
+> CSDI
+> Ideal
+
+Figure 5: PICP comparison between our model and CSDI on CrowdBM and MobileSH. sensitivity. These strengths arise from CoST’s hybrid design: the diffusion component models 313 
+
+residual uncertainty to capture multi-modal traits, while the deterministic backbone learns regular 314 
+
+trends. See Appendix C.5.1 for more analysis and results. 315 0 5 10 15 20                     
+
+> (a)
+> 0
+> 10
+> 20
+> Value  CSDI
+> CoST
+> Observations
+> 0510 15 20
+> (b)
+> 0
+> 20
+> 40
+> 0510 15 20
+> (c)
+> 0
+> 5
+> 10
+> Value
+> 0510 15 20
+> (d)
+> 0
+> 50
+> 100
+> 0510 15 20
+> (e)
+> 0
+> 50
+> Value
+> 0510 15 20
+> (f)
+> 0
+> 5
+> 10
+
+Figure 6: Visualizations of predictive uncertainty for both CSDI and CoST on the CrowdBJ dataset. The shaded regions represent the 90% confidence interval. The dashed lines denote the median of the predicted values for each model. 
+
+Analysis of prediction quality. To intuitively 316 
+
+demonstrate the effectiveness of our predictions, 317 
+
+we visualize results on the CrowdBJ dataset in 318 
+
+Figure 6, comparing our model with the best 319 
+
+baseline, CSDI. As shown in Figures 6 (a, c, f), 320 
+
+our model, aided by a deterministic backbone, 321 
+
+better captures regular spatiotemporal patterns. 322 
+
+Meanwhile, the diffusion module enhances un-323 
+
+certainty modeling by focusing on residuals, as 324 
+
+reflected in Figures 6 (b, d, e). Beyond sample-325 
+
+level comparison, we evaluate prediction inter-326 
+
+val calibration via dynamic quantile error curves 327 
+
+on CrowdBM and MobileSH (Figure 5). For 328 
+
+each confidence level α, we compute the cor-329 
+
+responding quantile interval and its Prediction 330 
+
+Interval Coverage Probability (PICP). Closer 331 
+
+alignment with the diagonal (black dashed line) 332 
+
+indicates better calibration. Our model consis-333 
+
+tently outperforms CSDI in this regard. 334 
+
+5.4 Computational Cost 335 
+
+We benchmark training and inference time (including 50 sampling iterations and pretraining for our 336 
+
+mean predictor) on the MobileSH dataset. As shown in Appendix Table 10, our method achieves 337 
+
+markedly higher efficiency than existing probabilistic models in both training and inference. This 338 
+
+efficiency is particularly advantageous for real-world applications such as mobile traffic prediction. 339 
+
+Notably, CSDI leverages the Transformer’s expressive power but incurs substantial computational 340 
+
+cost, limiting its applicability in time-sensitive settings. 341 
+
+## 6 Conclusion 342 
+
+In this work, we highlight the importance of probabilistic forecasting for complex spatiotemporal 343 
+
+systems and propose CoST, a collaborative framework that integrates deterministic and diffusion 344 
+
+models. By decomposing data into a conditional mean and residual component, CoST bridges 345 
+
+deterministic and probabilistic modeling, enabling accurate capture of both regular patterns and 346 
+
+uncertainties. Extensive experiments on seven real-world datasets show that CoST consistently 347 
+
+outperforms state-of-the-art methods with an average improvement of 25%. Our approach offers an 348 
+
+effective solution for combining precise pattern learning with uncertainty modeling in spatiotemporal 349 
+
+forecasting. 350 
+
+Limitations and future work. CoST relies on a strong deterministic backbone, which may limit its 351 
+
+applicability in domains lacking mature models. Moreover, it has not yet been validated on complex 352 
+
+physical systems governed by PDEs or coupled dynamics. Future work will explore physics-informed 353 
+
+extensions, adaptive decomposition, and more generalizable architectures. 354 
+
+9References 355 
+
+[1] Lei Bai, Lina Yao, Salil Kanhere, Xianzhi Wang, Quan Sheng, et al. Stg2seq: Spatial-356 
+
+temporal graph to sequence model for multi-step passenger demand forecasting. arXiv preprint 357 
+
+arXiv:1905.10069 , 2019. 358 
+
+[2] Lei Bai, Lina Yao, Salil S Kanhere, Zheng Yang, Jing Chu, and Xianzhi Wang. Passenger 359 
+
+demand forecasting with multi-task convolutional recurrent neural networks. In Advances in 360 
+
+Knowledge Discovery and Data Mining: 23rd Pacific-Asia Conference, PAKDD 2019, Macau, 361 
+
+China, April 14-17, 2019, Proceedings, Part II 23 , pages 29–42. Springer, 2019. 362 
+
+[3] Lei Bai, Lina Yao, Can Li, Xianzhi Wang, and Can Wang. Adaptive graph convolutional 363 
+
+recurrent network for traffic forecasting. Advances in neural information processing systems ,364 
+
+33:17804–17815, 2020. 365 
+
+[4] Dimitri Bertsekas and John N Tsitsiklis. Introduction to probability , volume 1. Athena Scientific, 366 
+
+2008. 367 
+
+[5] Oussama Boussif, Ghait Boukachab, Dan Assouline, Stefano Massaroli, Tianle Yuan, Loubna 368 
+
+Benabbou, and Yoshua Bengio. Improving* day-ahead* solar irradiance time series forecasting 369 
+
+by leveraging spatio-temporal context. Advances in Neural Information Processing Systems ,370 
+
+36:2342–2367, 2023. 371 
+
+[6] Mark A Cane. The evolution of el niño, past and future. Earth and Planetary Science Letters ,372 
+
+230(3-4):227–240, 2005. 373 
+
+[7] Dan Cao, Jiahua Zhang, Lan Xun, Shanshan Yang, Jingwen Wang, and Fengmei Yao. Spatiotem-374 
+
+poral variations of global terrestrial vegetation climate potential productivity under climate 375 
+
+change. Science of The Total Environment , 770:145320, 2021. 376 
+
+[8] Haoye Chai, Tao Jiang, and Li Yu. Diffusion model-based mobile traffic generation with 377 
+
+open data for network planning and optimization. In Proceedings of the 30th ACM SIGKDD 378 
+
+Conference on Knowledge Discovery and Data Mining , pages 4828–4838, 2024. 379 
+
+[9] Pascal Chang, Jingwei Tang, Markus Gross, and Vinicius C Azevedo. How i warped your 380 
+
+noise: a temporally-correlated noise prior for diffusion models. In The Twelfth International 381 
+
+Conference on Learning Representations , 2024. 382 
+
+[10] Changlu Chen, Yanbin Liu, Ling Chen, and Chengqi Zhang. Bidirectional spatial-temporal 383 
+
+adaptive transformer for urban traffic flow forecasting. IEEE Transactions on Neural Networks 384 
+
+and Learning Systems , 34(10):6913–6925, 2022. 385 
+
+[11] Jiayuan Chen, Shuo Zhang, Xiaofei Chen, Qiao Jiang, Hejiao Huang, and Chonglin Gu. 386 
+
+Learning traffic as videos: a spatio-temporal vae approach for traffic data imputation. In 387 
+
+International Conference on Artificial Neural Networks , pages 615–627. Springer, 2021. 388 
+
+[12] Weihuang Chen, Fangfang Wang, and Hongbin Sun. S2tnet: Spatio-temporal transformer 389 
+
+networks for trajectory prediction in autonomous driving. In Asian conference on machine 390 
+
+learning , pages 454–469. PMLR, 2021. 391 
+
+[13] Miguel Ángel De Miguel, José María Armingol, and Fernando Garcia. Vehicles trajectory 392 
+
+prediction using recurrent vae network. IEEE Access , 10:32742–32749, 2022. 393 
+
+[14] Jinliang Deng, Xiusi Chen, Renhe Jiang, Xuan Song, and Ivor W Tsang. St-norm: Spatial and 394 
+
+temporal normalization for multi-variate time series forecasting. In Proceedings of the 27th 395 
+
+ACM SIGKDD conference on knowledge discovery & data mining , pages 269–278, 2021. 396 
+
+[15] Nan Gao, Hao Xue, Wei Shao, Sichen Zhao, Kyle Kai Qin, Arian Prabowo, Mohammad Saiedur 397 
+
+Rahaman, and Flora D Salim. Generative adversarial networks for spatio-temporal data: A 398 
+
+survey. ACM Transactions on Intelligent Systems and Technology (TIST) , 13(2):1–25, 2022. 399 
+
+[16] Zhihan Gao, Xingjian Shi, Boran Han, Hao Wang, Xiaoyong Jin, Danielle Maddix, Yi Zhu, 400 
+
+Mu Li, and Yuyang Bernie Wang. Prediff: Precipitation nowcasting with latent diffusion models. 401 
+
+Advances in Neural Information Processing Systems , 36:78621–78656, 2023. 402 
+
+10 [17] Songwei Ge, Seungjun Nah, Guilin Liu, Tyler Poon, Andrew Tao, Bryan Catanzaro, David 403 
+
+Jacobs, Jia-Bin Huang, Ming-Yu Liu, and Yogesh Balaji. Preserve your own correlation: A noise 404 
+
+prior for video diffusion models. In Proceedings of the IEEE/CVF International Conference on 405 
+
+Computer Vision , pages 22930–22941, 2023. 406 
+
+[18] Xu Geng, Yaguang Li, Leye Wang, Lingyu Zhang, Qiang Yang, Jieping Ye, and Yan Liu. 407 
+
+Spatiotemporal multi-graph convolution network for ride-hailing demand forecasting. In 408 
+
+Proceedings of the AAAI conference on artificial intelligence , volume 33, pages 3656–3663, 409 
+
+2019. 410 
+
+[19] Tilmann Gneiting and Adrian E Raftery. Strictly proper scoring rules, prediction, and estimation. 411 
+
+Journal of the American statistical Association , 102(477):359–378, 2007. 412 
+
+[20] Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil 413 
+
+Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial networks. Communications 414 
+
+of the ACM , 63(11):139–144, 2020. 415 
+
+[21] Xizewen Han, Huangjie Zheng, and Mingyuan Zhou. Card: Classification and regression 416 
+
+diffusion models. Advances in Neural Information Processing Systems , 35:18100–18115, 2022. 417 
+
+[22] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances 418 
+
+in neural information processing systems , 33:6840–6851, 2020. 419 
+
+[23] Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, and 420 
+
+David J Fleet. Video diffusion models. Advances in Neural Information Processing Systems ,421 
+
+35:8633–8646, 2022. 422 
+
+[24] Zhanhong Jiang, Chao Liu, Adedotun Akintayo, Gregor P Henze, and Soumik Sarkar. Energy 423 
+
+prediction using spatiotemporal pattern networks. Applied Energy , 206:1022–1039, 2017. 424 
+
+[25] Guangyin Jin, Yuxuan Liang, Yuchen Fang, Zezhi Shao, Jincai Huang, Junbo Zhang, and 425 
+
+Yu Zheng. Spatio-temporal graph neural networks for predictive learning in urban computing: 426 
+
+A survey. IEEE Transactions on Knowledge and Data Engineering , 2023. 427 
+
+[26] Junchen Jin, Dingding Rong, Tong Zhang, Qingyuan Ji, Haifeng Guo, Yisheng Lv, Xiaoliang 428 
+
+Ma, and Fei-Yue Wang. A gan-based short-term link traffic prediction approach for urban road 429 
+
+networks under a parallel learning framework. IEEE Transactions on Intelligent Transportation 430 
+
+Systems , 23(9):16185–16196, 2022. 431 
+
+[27] Ming Jin, Shiyu Wang, Lintao Ma, Zhixuan Chu, James Y Zhang, Xiaoming Shi, Pin-Yu 432 
+
+Chen, Yuxuan Liang, Yuan-Fang Li, Shirui Pan, et al. Time-llm: Time series forecasting by 433 
+
+reprogramming large language models. arXiv preprint arXiv:2310.01728 , 2023. 434 
+
+[28] Diederik P Kingma. Auto-encoding variational bayes. arXiv preprint arXiv:1312.6114 , 2013. 435 
+
+[29] Yaguang Li, Rose Yu, Cyrus Shahabi, and Yan Liu. Diffusion convolutional recurrent neural 436 
+
+network: Data-driven traffic forecasting. arXiv preprint arXiv:1707.01926 , 2017. 437 
+
+[30] Yan Li, Xinjiang Lu, Yaqing Wang, and Dejing Dou. Generative time series forecasting with 438 
+
+diffusion, denoise, and disentanglement. Advances in Neural Information Processing Systems ,439 
+
+35:23009–23022, 2022. 440 
+
+[31] Yuxin Li, Wenchao Chen, Xinyue Hu, Bo Chen, Mingyuan Zhou, et al. Transformer-modulated 441 
+
+diffusion models for probabilistic multivariate time series forecasting. In The Twelfth Interna-442 
+
+tional Conference on Learning Representations , 2024. 443 
+
+[32] Lequan Lin, Zhengkun Li, Ruikun Li, Xuliang Li, and Junbin Gao. Diffusion models for time-444 
+
+series applications: a survey. Frontiers of Information Technology & Electronic Engineering ,445 
+
+25(1):19–41, 2024. 446 
+
+[33] Zhihui Lin, Maomao Li, Zhuobin Zheng, Yangyang Cheng, and Chun Yuan. Self-attention 447 
+
+convlstm for spatiotemporal prediction. In Proceedings of the AAAI conference on artificial 448 
+
+intelligence , volume 34, pages 11531–11538, 2020. 449 
+
+11 [34] Lingbo Liu, Ruimao Zhang, Jiefeng Peng, Guanbin Li, Bowen Du, and Liang Lin. Attentive 450 
+
+crowd flow machines. In Proceedings of the 26th ACM international conference on Multimedia ,451 
+
+pages 1553–1561, 2018. 452 
+
+[35] Shuai Liu, Xiucheng Li, Gao Cong, Yile Chen, and Yue Jiang. Multivariate time-series 453 
+
+imputation with disentangled temporal representations. In The Eleventh international conference 454 
+
+on learning representations , 2023. 455 
+
+[36] Yong Liu, Tengge Hu, Haoran Zhang, Haixu Wu, Shiyu Wang, Lintao Ma, and Mingsheng 456 
+
+Long. itransformer: Inverted transformers are effective for time series forecasting. In The 457 
+
+Twelfth International Conference on Learning Representations .458 
+
+[37] Ziqing Ma, Wenwei Wang, Tian Zhou, Chao Chen, Bingqing Peng, Liang Sun, and Rong Jin. 459 
+
+Fusionsf: Fuse heterogeneous modalities in a vector quantized framework for robust solar power 460 
+
+forecasting. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery 461 
+
+and Data Mining , pages 5532–5543, 2024. 462 
+
+[38] Morteza Mardani, Noah Brenowitz, Yair Cohen, Jaideep Pathak, Chieh-Yu Chen, Cheng-Chin 463 
+
+Liu, Arash Vahdat, Mohammad Amin Nabian, Tao Ge, Akshay Subramaniam, et al. Residual 464 
+
+corrective diffusion modeling for km-scale atmospheric downscaling, 2024. URL https://arxiv. 465 
+
+org/abs/2309.15214 , 2023. 466 
+
+[39] Michael J McPhaden, Stephen E Zebiak, and Michael H Glantz. Enso as an integrating concept 467 
+
+in earth science. science , 314(5806):1740–1745, 2006. 468 
+
+[40] Yuqi Nie, Nam H Nguyen, Phanwadee Sinthong, and Jayant Kalagnanam. A time series is 469 
+
+worth 64 words: Long-term forecasting with transformers. arXiv preprint arXiv:2211.14730 ,470 
+
+2022. 471 
+
+[41] Tim Palmer. Climate forecasting: Build high-resolution global climate models. Nature ,472 
+
+515(7527):338–339, 2014. 473 
+
+[42] TN Palmer. Towards the probabilistic earth-system simulator: A vision for the future of climate 474 
+
+and weather prediction. Quarterly Journal of the Royal Meteorological Society , 138(665):841– 475 
+
+861, 2012. 476 
+
+[43] Stephen B Pope. Turbulent flows. Measurement Science and Technology , 12(11):2020–2021, 477 
+
+2001. 478 
+
+[44] Yanjun Qin, Haiyong Luo, Fang Zhao, Yuchen Fang, Xiaoming Tao, and Chenxing Wang. 479 
+
+Spatio-temporal hierarchical mlp network for traffic forecasting. Information Sciences , 632:543– 480 
+
+554, 2023. 481 
+
+[45] Haonan Qiu, Menghan Xia, Yong Zhang, Yingqing He, Xintao Wang, Ying Shan, and Ziwei 482 
+
+Liu. Freenoise: Tuning-free longer video diffusion via noise rescheduling. arXiv preprint 483 
+
+arXiv:2310.15169 , 2023. 484 
+
+[46] Kashif Rasul, Calvin Seward, Ingmar Schuster, and Roland Vollgraf. Autoregressive denois-485 
+
+ing diffusion models for multivariate probabilistic time series forecasting. In International 486 
+
+Conference on Machine Learning , pages 8857–8868. PMLR, 2021. 487 
+
+[47] Salva Rühling Cachay, Bo Zhao, Hailey Joren, and Rose Yu. Dyffusion: A dynamics-informed 488 
+
+diffusion model for spatiotemporal forecasting. Advances in neural information processing 489 
+
+systems , 36:45259–45287, 2023. 490 
+
+[48] Divya Saxena and Jiannong Cao. D-gan: Deep generative adversarial nets for spatio-temporal 491 
+
+prediction. arXiv preprint arXiv:1907.08556 , 2019. 492 
+
+[49] Zezhi Shao, Zhao Zhang, Fei Wang, Wei Wei, and Yongjun Xu. Spatial-temporal identity: A 493 
+
+simple yet effective baseline for multivariate time series forecasting. In Proceedings of the 31st 494 
+
+ACM International Conference on Information & Knowledge Management , pages 4454–4458, 495 
+
+2022. 496 
+
+12 [50] Lifeng Shen and James Kwok. Non-autoregressive conditional diffusion models for time series 497 
+
+prediction. In International Conference on Machine Learning , pages 31016–31029. PMLR, 498 
+
+2023. 499 
+
+[51] Zhi Sheng, Yuan Yuan, Jingtao Ding, and Yong Li. Unveiling the power of noise priors: 500 
+
+Enhancing diffusion models for mobile traffic prediction. arXiv preprint arXiv:2501.13794 ,501 
+
+2025. 502 
+
+[52] Xingjian Shi, Zhourong Chen, Hao Wang, Dit-Yan Yeung, Wai-Kin Wong, and Wang-chun 503 
+
+Woo. Convolutional lstm network: A machine learning approach for precipitation nowcasting. 504 
+
+Advances in neural information processing systems , 28, 2015. 505 
+
+[53] Yusuke Tashiro, Jiaming Song, Yang Song, and Stefano Ermon. Csdi: Conditional score-based 506 
+
+diffusion models for probabilistic time series imputation. Advances in Neural Information 507 
+
+Processing Systems , 34:24804–24816, 2021. 508 
+
+[54] Lucas R Vargas Zeppetello, Adrian E Raftery, and David S Battisti. Probabilistic projections 509 
+
+of increased heat stress driven by climate change. Communications Earth & Environment ,510 
+
+3(1):183, 2022. 511 
+
+[55] Yunbo Wang, Zhifeng Gao, Mingsheng Long, Jianmin Wang, and S Yu Philip. Predrnn++: 512 
+
+Towards a resolution of the deep-in-time dilemma in spatiotemporal predictive learning. In 513 
+
+International conference on machine learning , pages 5123–5132. PMLR, 2018. 514 
+
+[56] Yunbo Wang, Mingsheng Long, Jianmin Wang, Zhifeng Gao, and Philip S Yu. Predrnn: 515 
+
+Recurrent neural networks for predictive learning using spatiotemporal lstms. Advances in 516 
+
+neural information processing systems , 30, 2017. 517 
+
+[57] Haomin Wen, Youfang Lin, Yutong Xia, Huaiyu Wan, Qingsong Wen, Roger Zimmermann, and 518 
+
+Yuxuan Liang. Diffstg: Probabilistic spatio-temporal graph forecasting with denoising diffusion 519 
+
+models. In Proceedings of the 31st ACM International Conference on Advances in Geographic 520 
+
+Information Systems , pages 1–12, 2023. 521 
+
+[58] Peng Xie, Tianrui Li, Jia Liu, Shengdong Du, Xin Yang, and Junbo Zhang. Urban flow 522 
+
+prediction from spatiotemporal data using machine learning: A survey. Information Fusion ,523 
+
+59:1–12, 2020. 524 
+
+[59] Lei Xu, Nengcheng Chen, Zeqiang Chen, Chong Zhang, and Hongchu Yu. Spatiotemporal 525 
+
+forecasting in earth system science: Methods, uncertainties, predictability and future directions. 526 
+
+Earth-Science Reviews , 222:103828, 2021. 527 
+
+[60] Yiyuan Yang, Ming Jin, Haomin Wen, Chaoli Zhang, Yuxuan Liang, Lintao Ma, Yi Wang, 528 
+
+Chenghao Liu, Bin Yang, Zenglin Xu, et al. A survey on diffusion models for time series and 529 
+
+spatio-temporal data. arXiv preprint arXiv:2404.18886 , 2024. 530 
+
+[61] Cunjun Yu, Xiao Ma, Jiawei Ren, Haiyu Zhao, and Shuai Yi. Spatio-temporal graph transformer 531 
+
+networks for pedestrian trajectory prediction. In Computer Vision–ECCV 2020: 16th European 532 
+
+Conference, Glasgow, UK, August 23–28, 2020, Proceedings, Part XII 16 , pages 507–523. 533 
+
+Springer, 2020. 534 
+
+[62] Xinyu Yuan and Yan Qiao. Diffusion-ts: Interpretable diffusion for general time series genera-535 
+
+tion. arXiv preprint arXiv:2403.01742 , 2024. 536 
+
+[63] Yuan Yuan, Jingtao Ding, Jie Feng, Depeng Jin, and Yong Li. Unist: A prompt-empowered 537 
+
+universal model for urban spatio-temporal prediction. In Proceedings of the 30th ACM SIGKDD 538 
+
+Conference on Knowledge Discovery and Data Mining , pages 4095–4106, 2024. 539 
+
+[64] Junbo Zhang, Yu Zheng, and Dekang Qi. Deep spatio-temporal residual networks for citywide 540 
+
+crowd flows prediction. In Proceedings of the AAAI conference on artificial intelligence ,541 
+
+volume 31, 2017. 542 
+
+[65] Liang Zhang, Jianqing Wu, Jun Shen, Ming Chen, Rui Wang, Xinliang Zhou, Cankun Xu, 543 
+
+Quankai Yao, and Qiang Wu. Satp-gan: Self-attention based generative adversarial network for 544 
+
+traffic flow prediction. Transportmetrica B: Transport Dynamics , 9(1):552–568, 2021. 545 
+
+13 [66] Zhongwei Zhang, Fuchen Long, Yingwei Pan, Zhaofan Qiu, Ting Yao, Yang Cao, and Tao Mei. 546 
+
+Trip: Temporal residual learning with image noise prior for image-to-video diffusion models. In 547 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 548 
+
+8671–8681, 2024. 549 
+
+[67] Zijian Zhang, Ze Huang, Zhiwei Hu, Xiangyu Zhao, Wanyu Wang, Zitao Liu, Junbo Zhang, 550 
+
+S Joe Qin, and Hongwei Zhao. Mlpst: Mlp is all you need for spatio-temporal prediction. 551 
+
+In Proceedings of the 32nd ACM International Conference on Information and Knowledge 552 
+
+Management , pages 3381–3390, 2023. 553 
+
+[68] Fan Zhou, Qing Yang, Ting Zhong, Dajiang Chen, and Ning Zhang. Variational graph neural 554 
+
+networks for road traffic prediction in intelligent transportation systems. IEEE Transactions on 555 
+
+Industrial Informatics , 17(4):2802–2812, 2020. 556 
+
+14 A Background 557 
+
+A.1 Glossary 558 
+
+We summarize all notations and symbols used throughout the paper in Table 4. 559 
+
+Table 4: Glossary of notations and symbols used in this paper. Symbol Used for 
+
+G = ( V, E, A) Graph structure where V is the node set, E is the edge set, and A is the adjacency matrix. 
+
+x ∈ RT ×V ×C Spatiotemporal data. 
+
+T The length of spatiotemporal series. 
+
+V The number of spatial units. 
+
+C The number of feature dimensions. 
+
+B Batch size. 
+
+P Prediction horizon. 
+
+M Historical horizon. 
+
+N The number of diffusion steps. 
+
+H Height of the grid-based data 
+
+W Width of the grid-based data 
+
+Q Customized fluctuation scale. 
+
+M The variance tensor. 
+
+S The random sign tensor. 
+
+{·} co Historical (conditional) term. 
+
+{·} ta Predicted (target) term. 
+
+{·} n Noisy data at n-th diffusion step. 
+
+μ Mean. 
+
+r Residual. 
+
+ϵ Gaussian noise. 
+
+K K The set of indices for the selected FFT components 
+
+{βn}Nn=1 The noise schedule in the diffusion process. 
+
+αn, ¯αn αn = 1 − βn, ¯αn = Qni=1 αi.
+
+ϵθ (·) The denoising network with parameter θ.
+
+αCI Significance level for the prediction interval. 
+
+1(·) Indicator function, which takes the value 1 when a certain condition is true, and 0 when the condition is false. 
+
+A.2 Spatiotemporal Data 560 
+
+Spatiotemporal data typically come in two forms: (i) Grid-based data , where the spatial dimension 561 
+
+V can be expressed in a two-dimensional form as H × W , with H and W denoting height and 562 
+
+width, respectively. (ii) Graph-based data , where V denotes the number of nodes in a spatial graph 563 
+
+G = ( V, E, A), defined by its set of nodes V, the set of edges E and the adjacency matrix A. Its 564 
+
+elements aij show if there’s an edge between node i and j in V, aij = 1 when there’s an edge and 565 
+
+aij = 0 otherwise. 566 
+
+## B Methodology 567 
+
+B.1 Algorithm 568 
+
+The training and inference procedures of CoST are summarized in Algorithm 1 and Algorithm 2, 569 
+
+respectively. 570 
+
+## C Experiments 571 
+
+C.1 Datasets 572 
+
+In our experiments, we evaluate the proposed method on ten real-world datasets across four domains: 573 
+
+climate , energy , communication systems , and urban systems . For climate forecasting, we train our 574 
+
+models on the simulated SST-CESM2 dataset and evaluate them on the observational SST-ERA5 575 
+
+dataset, using the first 30 years for validation and the remaining years for testing. The remaining 576 
+
+datasets are partitioned into training, validation, and test sets with a 6:2:2 ratio, and all datasets are 577 
+
+standardized during training.Table 5 provides a summary of the datasets. The details are as follows: 578 
+
+15 Algorithm 1 Training 
+
+1: Stage 1: Pretraining of Deterministic Model Eθ
+
+2: repeat 
+
+3: Estimate the conditional mean Eθ [xta  
+
+> 0
+
+|xco  
+
+> 0
+
+].
+
+4: Update Eθ using the following loss function: 
+
+L2 = Eθ [xta  
+
+> 0
+
+|xco  
+
+> 0
+
+] − xta 
+
+> 0
+> 22
+
+5: until The model has converged. 
+
+6: Stage 2: Training of Diffusion Model ϵθ
+
+7: repeat 
+
+8: Initialize n ∼ Uniform (1 , . . . , N ) and ϵ ∼ N (0 , I ).
+
+9: Calculate the target rta  
+
+> 0
+
+= xta  
+
+> 0
+
+− Eθ [xta  
+
+> 0
+
+|xco  
+
+> 0
+
+].
+
+10: Calculate noisy targets rta n using Eq. (13). 
+
+11: Update ϵθ using the following loss function: 
+
+L(θ) = ϵ − ϵθ (rta n , n |xco  
+
+> 0
+
+) 22
+
+12: until The model has converged. 
+
+Algorithm 2 Inference 
+
+1: Input: Context data xco  
+
+> 0
+
+, customized fluctuation scale Q, trained diffusion model ϵθ , trained deterministic model Eθ
+
+2: Output: Target data xta 
+
+> 0
+
+3: Estimate the conditional mean Eθ [xta  
+
+> 0
+
+|xco  
+
+> 0
+
+]
+
+4: Sample rta N from ϵ ∼ N (Q, I )
+
+5: for n = N to 1 do 
+
+6: Estimate the noise ϵθ (rta n , n |xco  
+
+> 0
+
+)
+
+7: Calculate the μθ (rta n , n |xco  
+
+> 0
+
+) using Eq. (14) 
+
+8: Sample rta n−1 using Eq. (2) 
+
+9: end for 
+
+10: Return: xta  
+
+> 0
+
+= Eθ [xta  
+
+> 0
+
+|xco  
+
+> 0
+
+] + rta 
+
+> 0
+
+• Climate. We utilize two datasets for sea surface temperature (SST) prediction in the Niño 3.4 region 579 
+
+(5°S–5°N, 170°W–120°W), which is widely used for monitoring El Niño events: (i) SST-CESM2, 580 
+
+simulated SST data from the CESM2-FV2 model of the CMIP6 project, covering the period from 581 
+
+1850 to 2014, with a spatial resolution of 1◦ × 1◦. (ii) SST-ERA5: reanalysis data from ERA5, 582 
+
+containing SST and 10-meter wind speed (U10/V10) variables from 1940 to 2025, with an original 583 
+
+spatial resolution of approximately 0.25 ◦ × 0.25 ◦. All data are regridded to a 1◦ × 1◦ resolution 584 
+
+for consistency. The CESM2 data are used for training, while the first 30 years of ERA5 are used 585 
+
+for validation and the remaining years for testing. 586 
+
+• Energy. This dataset contains real-time meteorological measurements and photovoltaic (PV) power 587 
+
+output collected from a PV power station in China, spanning from March 1st to December 31st, 588 
+
+2024. The features include: total active power output of the PV grid-connection point (P), ambient 589 
+
+temperature, back panel temperature, dew point, relative humidity, atmospheric pressure, global 590 
+
+horizontal irradiance (GHI), diffuse and direct radiation, wind direction and wind speed. Our 591 
+
+forecasting task focuses on GHI, which is the key variable for solar power prediction. Due to data 592 
+
+privacy restrictions, the raw dataset cannot be publicly released. 593 
+
+• Communication Systems. Mobile communication traffic datasets are collected from two major 594 
+
+cities in Shanghai and Nanjing, capturing the spatiotemporal dynamics of network usage patterns. 595 
+
+• Urban Systems. We adopt five widely used public datasets representing various urban sensing 596 
+
+signals: (i) CrowdBJ and CrowdBM, crowd flow data from Beijing and Baltimore, respectively. (ii) 597 
+
+TaxiBJ, taxi trajectory-based traffic flow data from Beijing. (iii) BikeDC, bike-sharing demand data 598 
+
+from Washington D.C. (iv) Los-Speed, traffic speed data from the Los Angeles road network. These 599 
+
+datasets have been extensively used in spatiotemporal forecasting research and provide diverse 600 
+
+signals for evaluating model generality across cities and domains. 601 
+
+16 Table 5: The basic information of grid-based spatio-temporal data. Dataset Location Type Temporal Period Spatial partition Interval SST-CESM2 Global (Niño 3.4) Simulated SST 1850-2014 1◦ × 1◦ Monthly SST-ERA5 Global (Niño 3.4) Reanalysis SST / U10 / V10 1940-2025 0.25 ◦ × 0.25 ◦ Monthly SolarPower China (a PV station) GHI / Weather / PV power 2024/03/01 - 2024/12/31 Station-level 15 min TaxiBJ Beijing Taxi flow 2014/03/01 - 2014/06/30 32 × 32 Half an hour TaxiBJ Beijing Taxi flow 2014/03/01 - 2014/06/30 32 × 32 Half an hour TaxiBJ Beijing Taxi flow 2014/03/01 - 2014/06/30 32 × 32 Half an hour BikeDC Washington, D.C. Bike flow 2010/09/20 - 2010/10/20 20 × 20 Half an hour MobileSH Shanghai Mobile traffic 2014/08/01 - 2014/08/21 32 × 28 One hour MobileNJ Nanjing Mobile traffic 2021/02/02 - 2021/02/22 20 × 28 One hour CrowdBJ Beijing Crowd flow 2018/01/01 - 2018/01/31 1010 One hour CrowdBM Baltimore Crowd flow 2019/01/01 - 2019/05/31 403 One hour Los-Speed Los Angeles Traffic speed 2012/03/01 - 2012/03/07 207 5 minutes 
+
+C.2 Baselines 602 
+
+We provide a brief description of the baselines used in our experiments: 603 
+
+• D3VAE [ 30 ]: Aims at short-period and noisy time series forecasting. It combines generative 604 
+
+modeling with a bidirectional variational auto-encoder, integrating diffusion, denoising, and disen-605 
+
+tanglement. 606 
+
+• DiffSTG [ 57 ]: First applies diffusion models to spatiotemporal graph forecasting. By combining 607 
+
+STGNNs and diffusion models, it reduces prediction errors and improves uncertainty modeling. 608 
+
+• TimeGrad [ 46 ]: An autoregressive model based on diffusion models. It conducts probabilistic 609 
+
+forecasting for multivariate time series and performs well on real-world datasets. 610 
+
+• CSDI [ 53 ]: Utilizes score-based diffusion models for time series imputation. It can leverage the 611 
+
+correlations of observed values and also shows remarkable results on prediction tasks. 612 
+
+• DYffusion [ 47 ]: A training method for diffusion models in probabilistic spatiotemporal forecasting. 613 
+
+It combines data temporal dynamics with diffusion steps and performs well in complex dynamics 614 
+
+forecasting. 615 
+
+• NPDiff [ 51 ]: A general noise prior framework for mobile traffic prediction. It uses the data 616 
+
+dynamics to calculate noise prior for the denoising process and achieve effective performance. 617 
+
+C.3 Experimental Configuration 618 
+
+In our experiment, for our model, we set the training maximum epoch for both the deterministic 619 
+
+model and the diffusion model to 50, with early stopping based on patience of 5 for both models. 620 
+
+For the diffusion model, we set the validation set sampling number to 3, and the average metric 621 
+
+computed over these samples is used as the criterion for early stopping. For the baseline models, we 622 
+
+set the maximum training epoch to 100 and the early stopping patience also to 5. We set the number 623 
+
+of samples to 50 for computing the experimental results presented in the paper. For the denoising 624 
+
+network architecture, we adopt a lightweight variant of the MLP-based STID [ 49 ]. Specifically, we 625 
+
+set the number of encoder layers to 8 and the embedding dimension to 128. The diffusion model 626 
+
+employs a maximum of 50 diffusion steps, using a linear noise schedule with β1 = 0 .0001 and 627 
+
+βN = 0 .5. During training, we set the initial learning rate to 0.001, and after 20 epochs, we adjust it 628 
+
+to 4e-4. We use the Adam optimizer with a weight decay of 1e-6. All experiments are conducted 629 
+
+with fixed random seeds. Models with lower GPU memory demands are run on NVIDIA TITAN 630 
+
+Xp (12GB GDDR5X) and NVIDIA GeForce RTX 4090 (24GB GDDR6X) GPUs under a Linux 631 
+
+environment. For the DYffusion [ 47 ] baseline, which requires substantially more resources, training 632 
+
+is performed on NVIDIA A100 (80GB HBM2e) and A800 (40GB HBM2e). 633 
+
+C.4 Geographic Extent of the ENSO Region 634 
+
+To provide geographic context for the SST case study presented in Section 3, Figure 7 illustrates the 635 
+
+global location and spatial extent of the selected region. The red box highlights the area from 4.5°S 636 
+
+to 4.5°N and 169.5°W to 120.5°W in the central-to-eastern equatorial Pacific, a region known for 637 
+
+strong ocean-atmosphere coupling and ENSO-related variability. 638 
+
+17 30
+
+> 25
+> 20
+> 15
+> 10
+> 5
+> 0
+
+Longitude(°)
+
+60°N
+
+30°N
+
+0°N
+
+30°S
+
+60°S
+
+90°S
+
+0°E 60°E 120°E 180°E 120°W 60°W
+
+> Se aSu rfaceT emp erature( °C)
+> Latitude( °)
+
+Figure 7: Global map indicating the spatial extent of ENSO region (highlighted in yellow). The region spans from 4.5°S to 4.5°N and 169.5°W to 120.5°W in the equatorial Pacific. 
+
+C.5 Additional Experimental Results 639 
+
+Table 6: Short-term forecasting results in terms of CRPS, QICE, and IS. Bold indicates the best performance, while underlining denotes the second-best. DYffusion is limited to grid-format data, and ‘-’ denotes results that are not applicable. 
+
+Model BikeDC MobileNJ CrowdBM Los-Speed CRPS QICE IS CRPS QICE IS CRPS QICE IS CRPS QICE IS 
+
+D3VAE 0.785 0.157 8.77 0.565 0.096 6.03 0.593 0.110 136.4 0.119 0.089 90.5 DiffSTG 0.692 0.157 8.08 0.291 0.071 3.11 0.453 0.047 68.5 0.078 0.045 50.9 TimeGrad 0.469 0.130 5.65 0.432 0.162 5.87 0.240 0.085 46.9 0.031 0.098 20.8 
+
+CSDI 0.529 0.057 4.79 0.111 0.039 0.80 0.390 0.054 61.1 0.059 0.026 30.8 NPDiff 0.442 0.066 7.11 0.128 0.133 2.22 0.331 0.119 91.2 0.057 0.023 30.5 DYffusion 0.573 0.079 6.46 0.196 0.080 1.80 - - - - - -
+
+CoST 0.419 0.028 3.45 0.089 0.032 0.66 0.256 0.027 37.8 0.056 0.023 31.9 Table 7: Short-term forecasting results in terms of MAE and RMSE. Bold indicates the best perfor-mance, while underlining denotes the second-best. DYffusion is limited to grid-format data, and ‘-’ denotes results that are not applicable. 
+
+Model BikeDC MobileNJ CrowdBM Los-Speed MAE RMSE MAE RMSE MAE RMSE MAE RMSE 
+
+D3VAE 0.871 3.59 0.580 1.135 11.0 24.7 8.28 11.9 DiffSTG 0.770 4.02 0.317 0.649 8.88 21.3 5.38 9.75 TimeGrad 0.843 1.07 0.340 0.357 10.1 12.4 2.33 3.00 
+
+CSDI 0.592 3.10 0.129 0.237 7.31 19.3 4.53 8.07 NPDiff 0.435 1.90 0.123 0.175 5.42 13.7 4.07 7.64 DYffusion 0.480 1.37 0.222 0.357 - - - -CoST 0.492 1.76 0.102 0.172 5.04 12.1 4.05 7.30 Table 8: Long-term forecasting results in terms of CRPS, QICE, and IS. Bold indicates the best performance, while underlining denotes the second-best. DYffusion is limited to grid-format data, and ‘-’ denotes results that are not applicable. 
+
+Model MobileSH Climate CrowdBJ CrowdBM Los-Speed CRPS QICE IS CRPS QICE IS CRPS QICE IS CRPS QICE IS CRPS QICE IS 
+
+D3VAE 0.798 0.129 1.830 0.075 0.083 24.0 0.710 0.109 63.9 0.674 0.108 152.3 0.138 0.101 113.2 DiffSTG 0.374 0.107 0.923 0.027 0.077 7.90 0.370 0.094 31.3 0.400 0.073 67.1 0.124 0.080 104.6 TimeGrad 0.245 0.075 0.408 0.041 0.101 14.2 0.371 0.073 32.4 0.237 0.049 33.9 0.192 0.081 98.8 CSDI 0.158 0.045 0.216 0.036 0.073 6.80 0.229 0.038 12.0 0.235 0.052 33.7 0.134 0.090 59.2 
+
+NPDiff 0.204 0.102 0.611 0.109 0.115 41.3 0.288 0.114 33.6 0.331 0.111 90.8 1.366 0.126 950.4 DYffusion 0.308 0.086 0.550 0.030 0.147 15.2 - - - - - - - - -
+
+CoST 0.158 0.016 0.218 0.024 0.011 4.87 0.217 0.011 11.5 0.235 0.009 31.2 0.089 0.040 64.6 18 Figure 8: Ablation study on the CrowdBJ and CrowdBM comparing variants in terms of (a) CRPS and (b) IS. 0.0 0.2 0.4 0.6 0.8 1.0 
+
+PIT Value 
+
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> Density
+
+(a) PIT Histogram Comparison 
+
+> Ideal Uniform
+> Baseline
+> CoST
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+PIT Value 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Cumulative Probability
+
+(b) Empirical CDF Comparison 
+
+> CoST
+> Baseline
+> Ideal CDF
+
+Figure 9: PIT analysis on the MobileSH dataset: (a) PIT histogram and (b) PIT empirical CDF. Table 10: Comparison of training and inference time on the MobileSH dataset. Model Train Time Inference Time D3VAE 3min 27s 2min 15s DiffSTG 24min 16s 18min 38s TimeGrad 5min 2min CSDI 48min 40s 38min 49s DyDiffusion 33h 3h CoST 2min 50s Table 9: Long-term forecasting results in terms of MAE and RMSE. Bold indicates the best perfor-mance, while underlining denotes the second-best. DYffusion is limited to grid-format data, and ‘-’ denotes results that are not applicable.                                                                                     
+
+> Model MobileSH SST CrowdBJ CrowdBM Los-Speed MAE RMSE MAE RMSE MAE RMSE MAE RMSE MAE RMSE
+> D3VAE 0.207 0.392 2.39 3.13 5.63 11.4 12.4 28.2 9.43 13.3 DiffSTG 0.078 0.125 0.94 1.19 3.04 6.37 7.59 18.8 7.77 14.2 TimeGrad 0.058 0.072 1.30 1.64 3.48 4.83 5.25 7.40 18.2 22.3 CSDI 0.035 0.057 1.31 1.63 1.99 3.64 4.64 12.4 11.3 15.0 NPDiff 0.037 0.057 1.91 2.82 2.06 3.28 5.44 13.8 46.0 58.3 DYffusion 0.047 0.066 0.85 1.06 ------
+> CoST 0.035 0.053 0.86 1.13 1.92 3.05 4.74 11.2 5.94 10.8
+
+C.5.1 Analysis of Distribution Alignment. 640 
+
+Additionally, we present the PIT (Probability Integral Transform) histogram in Figure 9 (a) and 641 
+
+the PIT empirical cumulative distribution function (CDF) in Figure 9 (b) to visually reflect the 642 
+
+19 alignment of the full distribution. Ideally, the true values’ quantiles in the predictive distribution 643 
+
+should follow a uniform distribution, corresponding to the dashed line in Figure 9 (a). In the case 644 
+
+of perfect calibration, the PIT CDF should closely resemble the yellow diagonal line. Clearly, our 645 
+
+model outperforms CSDI. 646 
+
+20 NeurIPS Paper Checklist 647 
+
+1. Claims 648 
+
+Question: Do the main claims made in the abstract and introduction accurately reflect the 649 
+
+paper’s contributions and scope? 650 
+
+Answer: [Yes] 651 
+
+Justification: See Abstract and Section 1. 652 
+
+Guidelines: 653 
+
+• The answer NA means that the abstract and introduction do not include the claims 654 
+
+made in the paper. 655 
+
+• The abstract and/or introduction should clearly state the claims made, including the 656 
+
+contributions made in the paper and important assumptions and limitations. A No or 657 
+
+NA answer to this question will not be perceived well by the reviewers. 658 
+
+• The claims made should match theoretical and experimental results, and reflect how 659 
+
+much the results can be expected to generalize to other settings. 660 
+
+• It is fine to include aspirational goals as motivation as long as it is clear that these goals 661 
+
+are not attained by the paper. 662 
+
+2. Limitations 663 
+
+Question: Does the paper discuss the limitations of the work performed by the authors? 664 
+
+Answer: [Yes] 665 
+
+Justification: See Section 6. 666 
+
+Guidelines: 667 
+
+• The answer NA means that the paper has no limitation while the answer No means that 668 
+
+the paper has limitations, but those are not discussed in the paper. 669 
+
+• The authors are encouraged to create a separate "Limitations" section in their paper. 670 
+
+• The paper should point out any strong assumptions and how robust the results are to 671 
+
+violations of these assumptions (e.g., independence assumptions, noiseless settings, 672 
+
+model well-specification, asymptotic approximations only holding locally). The authors 673 
+
+should reflect on how these assumptions might be violated in practice and what the 674 
+
+implications would be. 675 
+
+• The authors should reflect on the scope of the claims made, e.g., if the approach was 676 
+
+only tested on a few datasets or with a few runs. In general, empirical results often 677 
+
+depend on implicit assumptions, which should be articulated. 678 
+
+• The authors should reflect on the factors that influence the performance of the approach. 679 
+
+For example, a facial recognition algorithm may perform poorly when image resolution 680 
+
+is low or images are taken in low lighting. Or a speech-to-text system might not be 681 
+
+used reliably to provide closed captions for online lectures because it fails to handle 682 
+
+technical jargon. 683 
+
+• The authors should discuss the computational efficiency of the proposed algorithms 684 
+
+and how they scale with dataset size. 685 
+
+• If applicable, the authors should discuss possible limitations of their approach to 686 
+
+address problems of privacy and fairness. 687 
+
+• While the authors might fear that complete honesty about limitations might be used by 688 
+
+reviewers as grounds for rejection, a worse outcome might be that reviewers discover 689 
+
+limitations that aren’t acknowledged in the paper. The authors should use their best 690 
+
+judgment and recognize that individual actions in favor of transparency play an impor-691 
+
+tant role in developing norms that preserve the integrity of the community. Reviewers 692 
+
+will be specifically instructed to not penalize honesty concerning limitations. 693 
+
+3. Theory assumptions and proofs 694 
+
+Question: For each theoretical result, does the paper provide the full set of assumptions and 695 
+
+a complete (and correct) proof? 696 
+
+Answer: [Yes] 697 
+
+21 Justification: See Section 4.1 698 
+
+Guidelines: 699 
+
+• The answer NA means that the paper does not include theoretical results. 700 
+
+• All the theorems, formulas, and proofs in the paper should be numbered and cross-701 
+
+referenced. 702 
+
+• All assumptions should be clearly stated or referenced in the statement of any theorems. 703 
+
+• The proofs can either appear in the main paper or the supplemental material, but if 704 
+
+they appear in the supplemental material, the authors are encouraged to provide a short 705 
+
+proof sketch to provide intuition. 706 
+
+• Inversely, any informal proof provided in the core of the paper should be complemented 707 
+
+by formal proofs provided in appendix or supplemental material. 708 
+
+• Theorems and Lemmas that the proof relies upon should be properly referenced. 709 
+
+4. Experimental result reproducibility 710 
+
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-711 
+
+perimental results of the paper to the extent that it affects the main claims and/or conclusions 712 
+
+of the paper (regardless of whether the code and data are provided or not)? 713 
+
+Answer: [Yes] 714 
+
+Justification: We release all the code and data, as well as instructions for how to replicate 715 
+
+the results. See abstract and Section C.3. 716 
+
+Guidelines: 717 
+
+• The answer NA means that the paper does not include experiments. 718 
+
+• If the paper includes experiments, a No answer to this question will not be perceived 719 
+
+well by the reviewers: Making the paper reproducible is important, regardless of 720 
+
+whether the code and data are provided or not. 721 
+
+• If the contribution is a dataset and/or model, the authors should describe the steps taken 722 
+
+to make their results reproducible or verifiable. 723 
+
+• Depending on the contribution, reproducibility can be accomplished in various ways. 724 
+
+For example, if the contribution is a novel architecture, describing the architecture fully 725 
+
+might suffice, or if the contribution is a specific model and empirical evaluation, it may 726 
+
+be necessary to either make it possible for others to replicate the model with the same 727 
+
+dataset, or provide access to the model. In general. releasing code and data is often 728 
+
+one good way to accomplish this, but reproducibility can also be provided via detailed 729 
+
+instructions for how to replicate the results, access to a hosted model (e.g., in the case 730 
+
+of a large language model), releasing of a model checkpoint, or other means that are 731 
+
+appropriate to the research performed. 732 
+
+• While NeurIPS does not require releasing code, the conference does require all submis-733 
+
+sions to provide some reasonable avenue for reproducibility, which may depend on the 734 
+
+nature of the contribution. For example 735 
+
+(a) If the contribution is primarily a new algorithm, the paper should make it clear how 736 
+
+to reproduce that algorithm. 737 
+
+(b) If the contribution is primarily a new model architecture, the paper should describe 738 
+
+the architecture clearly and fully. 739 
+
+(c) If the contribution is a new model (e.g., a large language model), then there should 740 
+
+either be a way to access this model for reproducing the results or a way to reproduce 741 
+
+the model (e.g., with an open-source dataset or instructions for how to construct 742 
+
+the dataset). 743 
+
+(d) We recognize that reproducibility may be tricky in some cases, in which case 744 
+
+authors are welcome to describe the particular way they provide for reproducibility. 745 
+
+In the case of closed-source models, it may be that access to the model is limited in 746 
+
+some way (e.g., to registered users), but it should be possible for other researchers 747 
+
+to have some path to reproducing or verifying the results. 748 
+
+5. Open access to data and code 749 
+
+Question: Does the paper provide open access to the data and code, with sufficient instruc-750 
+
+tions to faithfully reproduce the main experimental results, as described in supplemental 751 
+
+material? 752 
+
+22 Answer: [Yes] 753 
+
+Justification: We have submitted code and data anonymously as supplementary materials. 754 
+
+Guidelines: 755 
+
+• The answer NA means that paper does not include experiments requiring code. 756 
+
+• Please see the NeurIPS code and data submission guidelines ( https://nips.cc/ 757 
+
+public/guides/CodeSubmissionPolicy ) for more details. 758 
+
+• While we encourage the release of code and data, we understand that this might not be 759 
+
+possible, so “No” is an acceptable answer. Papers cannot be rejected simply for not 760 
+
+including code, unless this is central to the contribution (e.g., for a new open-source 761 
+
+benchmark). 762 
+
+• The instructions should contain the exact command and environment needed to run to 763 
+
+reproduce the results. See the NeurIPS code and data submission guidelines ( https: 764 
+
+//nips.cc/public/guides/CodeSubmissionPolicy ) for more details. 765 
+
+• The authors should provide instructions on data access and preparation, including how 766 
+
+to access the raw data, preprocessed data, intermediate data, and generated data, etc. 767 
+
+• The authors should provide scripts to reproduce all experimental results for the new 768 
+
+proposed method and baselines. If only a subset of experiments are reproducible, they 769 
+
+should state which ones are omitted from the script and why. 770 
+
+• At submission time, to preserve anonymity, the authors should release anonymized 771 
+
+versions (if applicable). 772 
+
+• Providing as much information as possible in supplemental material (appended to the 773 
+
+paper) is recommended, but including URLs to data and code is permitted. 774 
+
+6. Experimental setting/details 775 
+
+Question: Does the paper specify all the training and test details (e.g., data splits, hyper-776 
+
+parameters, how they were chosen, type of optimizer, etc.) necessary to understand the 777 
+
+results? 778 
+
+Answer: [Yes] 779 
+
+Justification: We provide sufficient information on experimental setting. See Section C.3. 780 
+
+Guidelines: 781 
+
+• The answer NA means that the paper does not include experiments. 782 
+
+• The experimental setting should be presented in the core of the paper to a level of detail 783 
+
+that is necessary to appreciate the results and make sense of them. 784 
+
+• The full details can be provided either with the code, in appendix, or as supplemental 785 
+
+material. 786 
+
+7. Experiment statistical significance 787 
+
+Question: Does the paper report error bars suitably and correctly defined or other appropriate 788 
+
+information about the statistical significance of the experiments? 789 
+
+Answer: [Yes] 790 
+
+Justification: We report the the statistical significance of the experiments suitably and 791 
+
+correctly. See Section C.3. 792 
+
+Guidelines: 793 
+
+• The answer NA means that the paper does not include experiments. 794 
+
+• The authors should answer "Yes" if the results are accompanied by error bars, confi-795 
+
+dence intervals, or statistical significance tests, at least for the experiments that support 796 
+
+the main claims of the paper. 797 
+
+• The factors of variability that the error bars are capturing should be clearly stated (for 798 
+
+example, train/test split, initialization, random drawing of some parameter, or overall 799 
+
+run with given experimental conditions). 800 
+
+• The method for calculating the error bars should be explained (closed form formula, 801 
+
+call to a library function, bootstrap, etc.) 802 
+
+• The assumptions made should be given (e.g., Normally distributed errors). 803 
+
+23 • It should be clear whether the error bar is the standard deviation or the standard error 804 
+
+of the mean. 805 
+
+• It is OK to report 1-sigma error bars, but one should state it. The authors should 806 
+
+preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis 807 
+
+of Normality of errors is not verified. 808 
+
+• For asymmetric distributions, the authors should be careful not to show in tables or 809 
+
+figures symmetric error bars that would yield results that are out of range (e.g. negative 810 
+
+error rates). 811 
+
+• If error bars are reported in tables or plots, The authors should explain in the text how 812 
+
+they were calculated and reference the corresponding figures or tables in the text. 813 
+
+8. Experiments compute resources 814 
+
+Question: For each experiment, does the paper provide sufficient information on the com-815 
+
+puter resources (type of compute workers, memory, time of execution) needed to reproduce 816 
+
+the experiments? 817 
+
+Answer: [Yes] 818 
+
+Justification: We provide sufficient information on the computer resources. See Section C.3. 819 
+
+Guidelines: 820 
+
+• The answer NA means that the paper does not include experiments. 821 
+
+• The paper should indicate the type of compute workers CPU or GPU, internal cluster, 822 
+
+or cloud provider, including relevant memory and storage. 823 
+
+• The paper should provide the amount of compute required for each of the individual 824 
+
+experimental runs as well as estimate the total compute. 825 
+
+• The paper should disclose whether the full research project required more compute 826 
+
+than the experiments reported in the paper (e.g., preliminary or failed experiments that 827 
+
+didn’t make it into the paper). 828 
+
+9. Code of ethics 829 
+
+Question: Does the research conducted in the paper conform, in every respect, with the 830 
+
+NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?831 
+
+Answer: [Yes] 832 
+
+Justification: We make sure that the presented research conforms with the NeurIPS Code of 833 
+
+Ethics. 834 
+
+Guidelines: 835 
+
+• The answer NA means that the authors have not reviewed the NeurIPS Code of Ethics. 836 
+
+• If the authors answer No, they should explain the special circumstances that require a 837 
+
+deviation from the Code of Ethics. 838 
+
+• The authors should make sure to preserve anonymity (e.g., if there is a special consid-839 
+
+eration due to laws or regulations in their jurisdiction). 840 
+
+10. Broader impacts 841 
+
+Question: Does the paper discuss both potential positive societal impacts and negative 842 
+
+societal impacts of the work performed? 843 
+
+Answer: [Yes] 844 
+
+Justification: We provide thorough discussion about broader impacts of this work. See 845 
+
+Section 6. 846 
+
+Guidelines: 847 
+
+• The answer NA means that there is no societal impact of the work performed. 848 
+
+• If the authors answer NA or No, they should explain why their work has no societal 849 
+
+impact or why the paper does not address societal impact. 850 
+
+• Examples of negative societal impacts include potential malicious or unintended uses 851 
+
+(e.g., disinformation, generating fake profiles, surveillance), fairness considerations 852 
+
+(e.g., deployment of technologies that could make decisions that unfairly impact specific 853 
+
+groups), privacy considerations, and security considerations. 854 
+
+24 • The conference expects that many papers will be foundational research and not tied 855 
+
+to particular applications, let alone deployments. However, if there is a direct path to 856 
+
+any negative applications, the authors should point it out. For example, it is legitimate 857 
+
+to point out that an improvement in the quality of generative models could be used to 858 
+
+generate deepfakes for disinformation. On the other hand, it is not needed to point out 859 
+
+that a generic algorithm for optimizing neural networks could enable people to train 860 
+
+models that generate Deepfakes faster. 861 
+
+• The authors should consider possible harms that could arise when the technology is 862 
+
+being used as intended and functioning correctly, harms that could arise when the 863 
+
+technology is being used as intended but gives incorrect results, and harms following 864 
+
+from (intentional or unintentional) misuse of the technology. 865 
+
+• If there are negative societal impacts, the authors could also discuss possible mitigation 866 
+
+strategies (e.g., gated release of models, providing defenses in addition to attacks, 867 
+
+mechanisms for monitoring misuse, mechanisms to monitor how a system learns from 868 
+
+feedback over time, improving the efficiency and accessibility of ML). 869 
+
+11. Safeguards 870 
+
+Question: Does the paper describe safeguards that have been put in place for responsible 871 
+
+release of data or models that have a high risk for misuse (e.g., pretrained language models, 872 
+
+image generators, or scraped datasets)? 873 
+
+Answer: [NA] 874 
+
+Justification: The paper poses no such risks. 875 
+
+Guidelines: 876 
+
+• The answer NA means that the paper poses no such risks. 877 
+
+• Released models that have a high risk for misuse or dual-use should be released with 878 
+
+necessary safeguards to allow for controlled use of the model, for example by requiring 879 
+
+that users adhere to usage guidelines or restrictions to access the model or implementing 880 
+
+safety filters. 881 
+
+• Datasets that have been scraped from the Internet could pose safety risks. The authors 882 
+
+should describe how they avoided releasing unsafe images. 883 
+
+• We recognize that providing effective safeguards is challenging, and many papers do 884 
+
+not require this, but we encourage authors to take this into account and make a best 885 
+
+faith effort. 886 
+
+12. Licenses for existing assets 887 
+
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in 888 
+
+the paper, properly credited and are the license and terms of use explicitly mentioned and 889 
+
+properly respected? 890 
+
+Answer: [Yes] 891 
+
+Justification: All assets used in the paper are properly credited. The license and terms of use 892 
+
+are explicitly mentioned and properly respected. 893 
+
+Guidelines: 894 
+
+• The answer NA means that the paper does not use existing assets. 895 
+
+• The authors should cite the original paper that produced the code package or dataset. 896 
+
+• The authors should state which version of the asset is used and, if possible, include a 897 
+
+URL. 898 
+
+• The name of the license (e.g., CC-BY 4.0) should be included for each asset. 899 
+
+• For scraped data from a particular source (e.g., website), the copyright and terms of 900 
+
+service of that source should be provided. 901 
+
+• If assets are released, the license, copyright information, and terms of use in the 902 
+
+package should be provided. For popular datasets, paperswithcode.com/datasets 903 
+
+has curated licenses for some datasets. Their licensing guide can help determine the 904 
+
+license of a dataset. 905 
+
+• For existing datasets that are re-packaged, both the original license and the license of 906 
+
+the derived asset (if it has changed) should be provided. 907 
+
+25 • If this information is not available online, the authors are encouraged to reach out to 908 
+
+the asset’s creators. 909 
+
+13. New assets 910 
+
+Question: Are new assets introduced in the paper well documented and is the documentation 911 
+
+provided alongside the assets? 912 
+
+Answer: [Yes] 913 
+
+Justification: All new assets introduced in the paper are well documented and we provide 914 
+
+the documentation alongside the assets. 915 
+
+Guidelines: 916 
+
+• The answer NA means that the paper does not release new assets. 917 
+
+• Researchers should communicate the details of the dataset/code/model as part of their 918 
+
+submissions via structured templates. This includes details about training, license, 919 
+
+limitations, etc. 920 
+
+• The paper should discuss whether and how consent was obtained from people whose 921 
+
+asset is used. 922 
+
+• At submission time, remember to anonymize your assets (if applicable). You can either 923 
+
+create an anonymized URL or include an anonymized zip file. 924 
+
+14. Crowdsourcing and research with human subjects 925 
+
+Question: For crowdsourcing experiments and research with human subjects, does the paper 926 
+
+include the full text of instructions given to participants and screenshots, if applicable, as 927 
+
+well as details about compensation (if any)? 928 
+
+Answer: [NA] 929 
+
+Justification: The paper does not involve crowdsourcing nor research with human subjects. 930 
+
+Guidelines: 931 
+
+• The answer NA means that the paper does not involve crowdsourcing nor research with 932 
+
+human subjects. 933 
+
+• Including this information in the supplemental material is fine, but if the main contribu-934 
+
+tion of the paper involves human subjects, then as much detail as possible should be 935 
+
+included in the main paper. 936 
+
+• According to the NeurIPS Code of Ethics, workers involved in data collection, curation, 937 
+
+or other labor should be paid at least the minimum wage in the country of the data 938 
+
+collector. 939 
+
+15. Institutional review board (IRB) approvals or equivalent for research with human 940 
+
+subjects 941 
+
+Question: Does the paper describe potential risks incurred by study participants, whether 942 
+
+such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) 943 
+
+approvals (or an equivalent approval/review based on the requirements of your country or 944 
+
+institution) were obtained? 945 
+
+Answer: [NA] 946 
+
+Justification: The paper does not involve crowdsourcing nor research with human subjects. 947 
+
+Guidelines: 948 
+
+• The answer NA means that the paper does not involve crowdsourcing nor research with 949 
+
+human subjects. 950 
+
+• Depending on the country in which research is conducted, IRB approval (or equivalent) 951 
+
+may be required for any human subjects research. If you obtained IRB approval, you 952 
+
+should clearly state this in the paper. 953 
+
+• We recognize that the procedures for this may vary significantly between institutions 954 
+
+and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the 955 
+
+guidelines for their institution. 956 
+
+• For initial submissions, do not include any information that would break anonymity (if 957 
+
+applicable), such as the institution conducting the review. 958 
+
+26 16. Declaration of LLM usage 959 
+
+Question: Does the paper describe the usage of LLMs if it is an important, original, or 960 
+
+non-standard component of the core methods in this research? Note that if the LLM is used 961 
+
+only for writing, editing, or formatting purposes and does not impact the core methodology, 962 
+
+scientific rigorousness, or originality of the research, declaration is not required. 963 
+
+Answer: [NA] 964 
+
+We did not use large language models (LLMs) as an important, original, or non-standard 965 
+
+component of the core methods in this research 966 
+
+Guidelines: 967 
+
+• The answer NA means that the core method development in this research does not 968 
+
+involve LLMs as any important, original, or non-standard components. 969 
+
+• Please refer to our LLM policy ( https://neurips.cc/Conferences/2025/LLM )970 
+
+for what should or should not be described. 971 
+
+27
