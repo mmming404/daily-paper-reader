@@ -25,3 +25,73 @@ subscriptions:
     stage: A
     diff_threshold_pct: 15
   keyword_recall_mode: or
+  intent_profiles:
+    - tag: TS-forecast
+      description: 时序预测前沿方法论论文推送，涵盖点预测、概率预测、不确定性量化、生成式预测、智能体预测等方向。
+      enabled: true
+      paper_sources:
+        - biorxiv
+        - arxiv
+      keywords:
+        - keyword: probabilistic forecasting
+          keyword_cn: 概率预测
+          query: advances in probabilistic time series forecasting models
+        - keyword: generative forecasting
+          keyword_cn: 生成式预测
+          query: generative models for time series forecasting
+        - keyword: agent-based forecasting
+          keyword_cn: 基于智能体的预测
+          query: agent-based approaches to time series prediction
+        - keyword: time series forecasting
+          keyword_cn: 时序预测
+          query: latest breakthroughs in time series forecasting research
+        - keyword: neural forecasting
+          keyword_cn: 神经预测方法
+          query: deep learning based neural forecasting techniques
+        - keyword: model architecture
+          keyword_cn: 模型架构
+          query: innovative model architectures for time series forecasting
+      intent_queries:
+        - query: Frontier academic papers on time series forecasting with emphasis on methodological innovations
+          query_cn: 强调方法论创新的时序预测前沿学术论文
+          enabled: true
+          source: manual
+          note: ''
+        - query: Probabilistic and generative forecasting methods with uncertainty quantification techniques
+          query_cn: 结合不确定性量化的概率与生成式预测方法
+          enabled: true
+          source: manual
+          note: ''
+        - query: Agent based and deep learning approaches for temporal point and probabilistic prediction
+          query_cn: 用于时间点预测和概率预测的智能体和深度学习方法
+          enabled: true
+          source: manual
+          note: ''
+      updated_at: '2026-06-22T07:56:25.667Z'
+source_backends:
+  biorxiv:
+    papers_table: biorxiv_papers
+    use_vector_rpc: true
+    vector_rpc: match_biorxiv_papers_exact
+    vector_rpc_exact: match_biorxiv_papers_exact
+    use_bm25_rpc: true
+    bm25_rpc: match_biorxiv_papers_bm25
+    schema: public
+    kind: supabase
+    enabled: true
+    url: https://lyucdwgefyfbmaiopjbk.supabase.co
+    anon_key: sb_publishable_lX-oi64Uxyd7SIVv3_w2Uw_MTOojeKq
+  arxiv:
+    papers_table: arxiv_papers
+    use_vector_rpc: true
+    vector_rpc: match_arxiv_papers
+    vector_rpc_exact: match_arxiv_papers_exact
+    use_bm25_rpc: true
+    bm25_rpc: match_arxiv_papers_bm25
+    sync_table: arxiv_sync_status
+    sync_success_value: success
+    schema: public
+    kind: supabase
+    enabled: true
+    url: https://lyucdwgefyfbmaiopjbk.supabase.co
+    anon_key: sb_publishable_lX-oi64Uxyd7SIVv3_w2Uw_MTOojeKq
